@@ -1,6 +1,55 @@
 if (!require("pacman")) install.packages("pacman", repos="http://cran.r-project.org")
 pacman::p_load(multinomialTS, tidyverse, ggtext, patchwork, forecast, viridis, viridisLite, RColorBrewer)
 
+
+refit_func <- function(mod, n_refit = 10) {
+  
+  Tsample <- mod$Tsample
+  Y <- mod$Y
+  X <- mod$X
+  p <- ncol(X) + 1 # Number of independent variables plus intercept
+  n <- ncol(Y)
+  
+  ss_seq_list <- vector(mode = "list", length = n_refit)
+  ss_seq_list[[1]] <- mod
+  idx <- 1
+  
+  while (idx < length(ss_seq_list)) {
+    
+    B0.start <- ss_seq_list[[idx]]$B0
+    B.start <- ss_seq_list[[idx]]$B
+    
+    sigma.start <- ss_seq_list[[idx]]$sigma
+    
+    V.fixed = matrix(NA, n, n) # Covariance matrix of environmental variation in process eq
+    V.fixed[1] = 1
+    
+    V.start <- ss_seq_list[[idx]]$V
+    
+    B.fixed <- matrix(NA, ncol(X), n)
+    B.fixed[,1] <- 0
+    B0.fixed = matrix(c(0, rep(NA, n - 1)), nrow = 1, ncol = n)
+    
+    C.start <- ss_seq_list[[idx]]$C
+    C.fixed <- C.start
+    C.fixed[C.fixed != 0] <- NA
+    print(C.start)
+    print(C.fixed)
+    
+    ssm <- multinomialTS::mnTS(Y = Y, X = X, Tsample = Tsample, B0.start = B0.start, B.start = B.start,
+                               C.start = C.start, C.fixed = C.fixed, B0.fixed = B0.fixed,
+                               V.fixed = V.fixed, V.start = V.start,
+                               B.fixed = B.fixed, dispersion.fixed = 1, maxit.optim = 1e+07)
+    print(ssm$AIC)
+    idx <- idx + 1
+    print(idx)
+    ss_seq_list[[idx]] <- ssm
+    
+  }
+  return(ss_seq_list)
+}
+
+
 # grimm_06_pollen <- get_sites(siteid = 2570) |> 
 #   get_datasets() |>
 #   neotoma2::filter(datasettype == "pollen" & !is.na(age_range_young)) |> 
@@ -108,11 +157,22 @@ grimm_06_pollen_wide <- grimm_06_groups |>
 dim(chron)
 
 composite_join <- chron |> 
-  full_join(grimm_06_pollen_wide, by = "depth") |> 
+  # full_join(grimm_06_pollen_wide, by = "depth") |> 
   full_join(core_20_char, by = "depth") |> 
   full_join(core_20_spore, by = "depth") |> 
   filter(depth >= min(grimm_06_pollen_wide$depth),
          depth <= max(grimm_06_pollen_wide$depth)) |> 
+  mutate(heinrich = NA,
+       heinrich = case_when(age <= 62400 & age >= 59700 ~ 1,
+                            age <= 49300 & age >= 47600 ~ 1,
+                            age <= 40200 & age >= 36800 ~ 1,
+                            age <= 31300 & age >= 30000 ~ 1,
+                            age <= 24700 & age >= 23400 ~ 1,
+                            age <= 18300 & age >= 15100 ~ 1,
+                            age <= 12900 & age >= 11000 ~ 1,
+                            .default = NA),
+       humans = NA,
+       humans = case_when(age  <= 14500 ~ 1, .default = NA)) |> 
   arrange(desc(age))
 
 dim(composite_join)
@@ -123,26 +183,41 @@ composite_join_pollen <- composite_join |>
   select(depth, age, grimm_age, other, Grass, Herbs, Pinus, Quercus) |> 
   pivot_longer(-c(depth, age, grimm_age))
 
-grimm_labels <- composite_join_pollen |> 
-  filter(!is.na(grimm_age)) |> 
-  distinct(age, grimm_age) |> 
+composite_join_pollen |> 
+  ggplot(aes(x = age, y = value)) +
+  geom_area(fill = "grey20") +
+  geom_segment(data = composite_join_pollen,
+               aes(x = age, xend = age,
+                   y = 0, yend = value), colour = "grey30", linewidth = 0.6) +
+  scale_x_reverse(breaks = scales::breaks_pretty(n = 6)) +
+  coord_flip() +
+  labs(y = "Pollen counts", x = "Time (ybp)") +
+  facet_wrap(~name, nrow = 1) +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 9),
+  )
+
+grimm_labels <- composite_join_pollen |>
+  filter(!is.na(grimm_age)) |>
+  distinct(age, grimm_age) |>
   slice(seq(from = 1, to = 191, by = 20), 191)
 
 plot(composite_join_pollen$age, composite_join_pollen$grimm_age, type = 'l')
 
-composite_join_pollen |> 
+composite_join_pollen |>
   ggplot(aes(x = age, y = value)) +
     geom_area(fill = "grey20") +
     geom_segment(data = composite_join_pollen,
                  aes(x = age, xend = age,
                      y = 0, yend = value), colour = "grey30", linewidth = 0.6) +
-    geom_vline(data = grimm_labels, aes(xintercept = age), 
-               color = "red", linetype = "dashed") +
-    geom_text(data = grimm_labels, 
-              aes(y = 400, 
-                  x = age, 
-                  label = paste0("Grimm: ", grimm_age)), 
-                  vjust = 0, size = 3) +
+    # geom_vline(data = grimm_labels, aes(xintercept = age),
+    #            color = "red", linetype = "dashed") +
+    # geom_text(data = grimm_labels,
+    #           aes(y = 400,
+    #               x = age,
+    #               label = paste0("Grimm: ", grimm_age)),
+    #               vjust = 0, size = 3) +
     scale_x_reverse(breaks = scales::breaks_pretty(n = 6)) +
     coord_flip() +
     labs(y = "Pollen counts", x = "Time (ybp)") +
@@ -154,7 +229,7 @@ composite_join_pollen |>
 
 
 composite_join_cov <- composite_join |> 
-  select(depth, age, char_acc, ocfs) |> 
+  select(depth, age, char_acc, ocfs, heinrich, humans) |> 
   filter(depth >= min(grimm_06_pollen_wide$depth),
          depth <= max(grimm_06_pollen_wide$depth)) |> 
   pivot_longer(-c(depth, age)) |> 
@@ -188,12 +263,16 @@ composite_join_bin <- bind_cols(bins = bins, composite_join) |>
   summarise(
     age = mean(age, na.rm = T),
     char_acc = mean(char_acc, na.rm = T),
+    heinrich = mean(heinrich, na.rm = T),
+    humans = mean(humans, na.rm = T),
     ocfs = mean(ocfs, na.rm = T),
     other = sum(other, na.rm = T),
     Grass = sum(Grass, na.rm = T),
     Herbs = sum(Herbs, na.rm = T),
     Pinus = sum(Pinus, na.rm = T),
     Quercus = sum(Quercus, na.rm = T)) |> 
+  mutate(heinrich = ifelse(is.nan(heinrich), 0, heinrich),
+         humans = ifelse(is.nan(humans), 0, humans)) |>
   arrange(desc(age))
 
 composite_join_bin |> filter(age > 700)
@@ -227,18 +306,19 @@ oxy18_mean <- oxy18 |>
   rename(age = Age) |> 
   group_by(age) |> 
   summarise(d18O = mean(d18O)) |> 
-  arrange(desc(age)) |> 
-  mutate(heinrich = NA,
-         heinrich = case_when(age <= 62400 & age >= 59700 ~ 1,
-                              age <= 49300 & age >= 47600 ~ 1,
-                              age <= 40200 & age >= 36800 ~ 1,
-                              age <= 31300 & age >= 30000 ~ 1,
-                              age <= 24700 & age >= 23400 ~ 1,
-                              age <= 18300 & age >= 15100 ~ 1,
-                              age <= 12900 & age >= 11000 ~ 1,
-                              .default = NA),
-         humans = NA,
-         humans = case_when(age  <= 20000 ~ 1, .default = NA))
+  arrange(desc(age))
+  # mutate(heinrich = NA,
+  #        heinrich = case_when(age <= 62400 & age >= 59700 ~ 1,
+  #                             age <= 49300 & age >= 47600 ~ 1,
+  #                             age <= 40200 & age >= 36800 ~ 1,
+  #                             age <= 31300 & age >= 30000 ~ 1,
+  #                             age <= 24700 & age >= 23400 ~ 1,
+  #                             age <= 18300 & age >= 15100 ~ 1,
+  #                             age <= 12900 & age >= 11000 ~ 1,
+  #                             .default = NA),
+  #        humans = NA,
+  #        humans = case_when(age  <= 14500 ~ 1, .default = NA))
+  #        humans = case_when(age  <= 22000 ~ 1, .default = NA))
 
 
 
@@ -252,10 +332,11 @@ oxy18_mean <- cbind(oxy_bins, oxy18_mean) |>
   group_by(oxy_bins) |> 
   summarise(mean_age_oxy = mean(age),
             d18O = mean(d18O),
-            humans = mean(humans, na.rm = T),
-            heinrich = mean(heinrich, na.rm = T)) |> 
-  mutate(heinrich = ifelse(is.nan(heinrich), 0, heinrich),
-         humans = ifelse(is.nan(humans), 0, humans)) |> 
+            # humans = mean(humans, na.rm = T),
+            # heinrich = mean(heinrich, na.rm = T)
+            ) |> 
+  # mutate(heinrich = ifelse(is.nan(heinrich), 0, heinrich),
+  #        humans = ifelse(is.nan(humans), 0, humans)) |> 
   arrange(desc(mean_age_oxy))
 
 ###  
@@ -317,8 +398,7 @@ all_composite |>
 
 
 
-# multinomialTS -----------------------------------------------------------
-
+# Without interactions ----------------------------------------------------
 
 # set up Y
 Y <- all_composite |>
@@ -331,8 +411,10 @@ Tsample <- which(rowSums(Y) != 0)
 X <- all_composite |>
   select(char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
   mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp)) |> 
-  as.matrix() |>
-  scale()
+  # mutate(ocfs = log(ocfs)) |> 
+  mutate(across(-c(humans, heinrich), scale)) |> 
+  as.matrix()
+  
 
 
 p <- ncol(X) + 1 # Number of independent variables plus intercept
@@ -386,4 +468,114 @@ end_time <- Sys.time()
 end_time - start_time
 
 
+# mnTS_mod_refit <- refit_func(mnTS_mod, 5)
+# lapply(mnTS_mod_refit, coef)
 
+# With interactions -------------------------------------------------------
+
+
+C.start.diag.int = .5 * diag(n)
+C.start.diag.int[4, 5] = C.start.diag.int[5, 4] = .5
+
+C.fixed.diag.int <- C.start.diag.int
+C.fixed.diag.int[C.fixed.diag.int != 0] <- NA
+
+
+start_time <- Sys.time()
+mnTS_mod_int <- mnTS(Y = Y[Tsample, ],
+                     X = X, Tsample = Tsample,
+                     B0.start = mnTS_mod$B0, B0.fixed = B0.fixed,
+                     B.start = mnTS_mod$B, B.fixed = B.fixed,
+                     C.start = C.start.diag.int, C.fixed = C.fixed.diag.int,
+                     V.start = mnTS_mod$V, V.fixed = V.fixed,
+                     dispersion.fixed = 1, maxit.optim = 1e+6)
+
+end_time <- Sys.time()
+end_time - start_time
+
+# mnTS_mod_int_refit <- refit_func(mnTS_mod_int, 5)
+# lapply(mnTS_mod_int_refit, coef)
+
+
+# Plotting ----------------------------------------------------------------
+
+ssms <- list(mnTS_mod = mnTS_mod_refit[[4]],
+             mnTS_mod_int = mnTS_mod_int)
+
+wald <- lapply(ssms, \(hyp) {
+  wald <- coef(hyp)
+  as_tibble(wald, rownames = "cov")
+})
+wald_bind <- bind_rows(wald, .id = "hyp") %>% 
+  mutate(sig = P < 0.05,
+         hyp = forcats::fct(hyp))
+
+wald_bind_x <- wald_bind %>% 
+  filter(!grepl("sp.|^Grass|^Herbs|^Pinus|^Quercus", cov))
+
+
+B_plot <- ggplot(wald_bind_x, aes(x = hyp, y = Coef., colour = as_factor(sig))) +
+  geom_point() +
+  geom_errorbar(aes(ymin = Coef. - se, ymax = Coef. + se)) +
+  geom_hline(yintercept = 0) +
+  scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
+                     values = c("#BF0606", "#5ab4ac")) +
+  labs(x = "Taxa", y = "Coefficient") +
+  facet_wrap(~cov) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    legend.position = "bottom"
+  )
+
+B_plot
+
+
+
+wald_bind_c <- wald_bind %>% 
+  filter(grepl("sp.", cov))
+
+C_plot <- ggplot(wald_bind_c, aes(x = as_factor(cov), y = Coef., colour = as_factor(sig))) +
+  geom_point() +
+  geom_errorbar(aes(ymin = Coef. - se, ymax = Coef. + se)) +
+  geom_hline(yintercept = 0) +
+  scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
+                     values = c("#BF0606", "#5ab4ac")) +
+  labs(x = "Taxa", y = "Coefficient") +
+  facet_wrap(~hyp) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    legend.position = "bottom"
+  )
+
+C_plot
+
+
+ggplot(composite_join_pollen |> filter(name == "Pinus"), aes(x = age, y = value)) +
+  geom_area(colour = "grey90") +
+  geom_col() +
+  geom_vline(xintercept = c(62400,
+                            49300,
+                            40200,
+                            31300,
+                            24700,
+                            18300,
+                            12900,
+                            59700,
+                            47600,
+                            36800,
+                            30000,
+                            23400,
+                            15100,
+                            11000), colour = "red") +
+  scale_x_reverse(breaks = scales::breaks_pretty(n = 6)) +
+  # coord_flip() +
+  # ylim(0, 0.5) +
+  labs(y = "Pollen counts", x = "Time (ybp)") +
+  # facet_wrap(~variablename,
+  #            nrow = 1) +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 10),
+  )
