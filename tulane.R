@@ -158,6 +158,18 @@ pollen_wide <- grimm_06_groups |>
   arrange(desc(age))
 
 
+# nora_poll <-  read_csv("./data/tula94_pollen_files/tula94_pollen.csv")
+# 
+# nora_poll <- nora_poll |>
+#   pivot_wider(id_cols = c(depth, age, new_age), names_from = variablename, values_from = value) |> 
+#   select(depth, age, new_age) |> 
+#   rename("nora_new_age" = "new_age") |> 
+#   rename("nora_old_age" = "age") |> 
+#   rename("nora_depth" = "depth") |> 
+#   arrange(desc(nora_depth))
+# 
+# check_ages <- full_join(pollen_wide, nora_poll, by = c("grimm_depth" = "nora_depth"))
+
 # Plot counts
 # Yes, they counted >500 quercus in that spike...
 pollen_wide |>
@@ -312,6 +324,40 @@ all_composite |>
   geom_line() +
   facet_wrap(~name, scales = "free", ncol = 1)
 
+all_composite |>
+  select(bins, char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
+  mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp)) |> 
+  mutate(across(-c(humans, heinrich, bins), ~ as.numeric(scale(.)))) |> 
+  pivot_longer(-c(bins)) |> 
+  ggplot(aes(x = bins, y = value)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~name, scales = "free", ncol = 1)
+
+# plot(all_composite$ocfs)
+# plot(log(all_composite$ocfs))
+# plot(scale(forecast::na.interp(all_composite$ocfs)))
+
+# x <- log(forecast::na.interp(all_composite$ocfs))
+# x[is.infinite(x)] <- 0
+# plot(x)
+
+# x <- log(all_composite$ocfs)
+# x[is.infinite(x)] <- 0
+# x <- forecast::na.interp(x)
+# plot(scale(x))
+
+# all_composite |> 
+#   select(bins, char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
+#   mutate(ocfs = log(ocfs),
+#   ocfs = ifelse(ocfs == -Inf, 0, ocfs)) |>
+#   mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp)) |>
+#   pivot_longer(-c(bins)) |> 
+#   ggplot(aes(x = bins, y = value)) +
+#   geom_point() +
+#   geom_line() +
+#   facet_wrap(~name, scales = "free", ncol = 1)
+
 # X_co2 <- data.frame(y = co2$CO2_blank_gravity_corrected, x = co2$age_calBP)
 # X_co2_gam <- mgcv::gam(y ~ s(x, bs = "bs", k = nrow(X_co2)), method = "REML", data =  X_co2)
 # pred_co2 <- predict(X_co2_gam, newdata = data.frame(x = oxy_co2$mean_age_oxy[which(is.na(oxy_co2$mean_co2))] ))
@@ -341,11 +387,11 @@ Tsample <- which(rowSums(Y) != 0)
 X <- all_composite |>
   select(char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
   mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp)) |> 
-  mutate(ocfs = log(ocfs),
-         ocfs = ifelse(ocfs == -Inf, 0, ocfs)) |>
-  mutate(across(-c(humans, heinrich), scale)) |> 
+  mutate(across(-c(humans, heinrich), ~ as.numeric(scale(.)))) |> 
   as.matrix()
-  
+
+matplot(X, type = 'l')
+
 p <- ncol(X) + 1 # Number of independent variables plus intercept
 n <- ncol(Y)
 
@@ -396,12 +442,10 @@ mnTS_mod <- mnTS(Y = Y[Tsample, ],
 end_time <- Sys.time()
 end_time - start_time
 
-
-# mnTS_mod_refit <- refit_func(mnTS_mod, 5)
-# lapply(mnTS_mod_refit, coef)
+mnTS_mod_refit <- refit_func(mnTS_mod, 5)
+lapply(mnTS_mod_refit, coef)
 
 # With interactions -------------------------------------------------------
-
 
 C.start.diag.int = .5 * diag(n)
 C.start.diag.int[4, 5] = C.start.diag.int[5, 4] = .5
@@ -422,14 +466,14 @@ mnTS_mod_int <- mnTS(Y = Y[Tsample, ],
 end_time <- Sys.time()
 end_time - start_time
 
-# mnTS_mod_int_refit <- refit_func(mnTS_mod_int, 5)
-# lapply(mnTS_mod_int_refit, coef)
+mnTS_mod_int_refit <- refit_func(mnTS_mod_int, 5)
+lapply(mnTS_mod_int_refit, coef)
 
 
 # Plotting ----------------------------------------------------------------
 
-ssms <- list(mnTS_mod = mnTS_mod_refit[[4]],
-             mnTS_mod_int = mnTS_mod_int)
+ssms <- list(mnTS_mod = mnTS_mod_refit[[2]],
+             mnTS_mod_int = mnTS_mod_int_refit[[2]])
 
 wald <- lapply(ssms, \(hyp) {
   wald <- coef(hyp)
@@ -459,8 +503,6 @@ B_plot <- ggplot(wald_bind_x, aes(x = hyp, y = Coef., colour = as_factor(sig))) 
 
 B_plot
 
-
-
 wald_bind_c <- wald_bind %>% 
   filter(grepl("sp.", cov))
 
@@ -481,30 +523,30 @@ C_plot <- ggplot(wald_bind_c, aes(x = as_factor(cov), y = Coef., colour = as_fac
 C_plot
 
 
-ggplot(composite_join_pollen |> filter(name == "Pinus"), aes(x = age, y = value)) +
-  geom_area(colour = "grey90") +
-  geom_col() +
-  geom_vline(xintercept = c(62400,
-                            49300,
-                            40200,
-                            31300,
-                            24700,
-                            18300,
-                            12900,
-                            59700,
-                            47600,
-                            36800,
-                            30000,
-                            23400,
-                            15100,
-                            11000), colour = "red") +
-  scale_x_reverse(breaks = scales::breaks_pretty(n = 6)) +
-  # coord_flip() +
-  # ylim(0, 0.5) +
-  labs(y = "Pollen counts", x = "Time (ybp)") +
-  # facet_wrap(~variablename,
-  #            nrow = 1) +
-  theme_minimal() +
-  theme(
-    text = element_text(size = 10),
-  )
+# ggplot(composite_join_pollen |> filter(name == "Pinus"), aes(x = age, y = value)) +
+#   geom_area(colour = "grey90") +
+#   geom_col() +
+#   geom_vline(xintercept = c(62400,
+#                             49300,
+#                             40200,
+#                             31300,
+#                             24700,
+#                             18300,
+#                             12900,
+#                             59700,
+#                             47600,
+#                             36800,
+#                             30000,
+#                             23400,
+#                             15100,
+#                             11000), colour = "red") +
+#   scale_x_reverse(breaks = scales::breaks_pretty(n = 6)) +
+#   # coord_flip() +
+#   # ylim(0, 0.5) +
+#   labs(y = "Pollen counts", x = "Time (ybp)") +
+#   # facet_wrap(~variablename,
+#   #            nrow = 1) +
+#   theme_minimal() +
+#   theme(
+#     text = element_text(size = 10),
+#   )
