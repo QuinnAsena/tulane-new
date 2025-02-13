@@ -1,5 +1,6 @@
 if (!require("pacman")) install.packages("pacman", repos="http://cran.r-project.org")
-pacman::p_load(multinomialTS, tidyverse, ggtext, patchwork, forecast, viridis, viridisLite, RColorBrewer)
+pacman::p_load(multinomialTS, tidyverse, ggtext, patchwork, forecast,
+               future, furrr, viridis, viridisLite, RColorBrewer)
 
 # Function to re-fit the model if necessary
 refit_func <- function(mod, n_refit = 10) {
@@ -202,7 +203,7 @@ pollen_wide_binned <- bind_cols(bins = bins, pollen_wide) |>
     Herbs = sum(Herbs, na.rm = T),
     Pinus = sum(Pinus, na.rm = T),
     Quercus = sum(Quercus, na.rm = T)) |> 
-  arrange(desc(age))
+  arrange(desc(bins))
 
 dim(pollen_wide)
 dim(pollen_wide_binned)
@@ -250,6 +251,7 @@ cov_bins <- cut(composite_covariate_join$cov_age,
 
 
 composite_covariate_join_bin <- bind_cols(bins = cov_bins, composite_covariate_join) |> 
+  drop_na(bins) |> # we lose one ocfs observation at 64720
   group_by(bins) |> 
   summarise(
     cov_age = mean(cov_age, na.rm = T),
@@ -306,6 +308,25 @@ all_composite <- pollen_wide_binned |>
   full_join(oxy18_mean, by = "bins") |> 
   arrange(desc(bins))
 
+# all_composite |> select(bins, age, ocfs) |> 
+#   arrange(bins) |> 
+#   print(n = 50)
+# 
+# all_composite |> select(bins, age, ocfs) |> 
+#   print(n = 50)
+# 
+# all_composite |> select(bins, age, ocfs) |> 
+#   arrange(bins) |> 
+#   mutate(across(c(ocfs), forecast::na.interp)) |> 
+#   print(n = 20) |> 
+#   tail(n = 20)
+# 
+# all_composite |> select(bins, age, ocfs) |> 
+#   arrange(desc(bins)) |> 
+#   mutate(across(c(ocfs), forecast::na.interp)) |> 
+#   print(n = 20) |> 
+#   tail(n = 20)
+
 
 all_composite |> 
   select(bins, char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
@@ -334,18 +355,23 @@ all_composite |>
   geom_line() +
   facet_wrap(~name, scales = "free", ncol = 1)
 
-# plot(all_composite$ocfs)
-# plot(log(all_composite$ocfs))
-# plot(scale(forecast::na.interp(all_composite$ocfs)))
+# Try sqrt transform?
+plot(all_composite$ocfs)
+plot(log(all_composite$ocfs))
+plot(sqrt(all_composite$ocfs))
+plot(scale(forecast::na.interp(all_composite$ocfs)))
 
-# x <- log(forecast::na.interp(all_composite$ocfs))
-# x[is.infinite(x)] <- 0
-# plot(x)
+all_composite |>
+  select(bins, ocfs, age) |> 
+  mutate(across(c(ocfs), forecast::na.interp)) |>
+  arrange(age) |> 
+  ggplot(aes(x = bins, y = ocfs)) +
+    geom_point() +
+    geom_line()
 
-# x <- log(all_composite$ocfs)
-# x[is.infinite(x)] <- 0
-# x <- forecast::na.interp(x)
-# plot(scale(x))
+x <- sqrt(all_composite$ocfs)
+x <- forecast::na.interp(x)
+plot(scale(x))
 
 # all_composite |> 
 #   select(bins, char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
@@ -378,17 +404,24 @@ all_composite |>
 
 # set up Y
 Y <- all_composite |>
-  select(other, Grass, Herbs, Pinus, Quercus) |>
+  select(bins, other, Grass, Herbs, Pinus, Quercus) |>
+  arrange(desc(bins)) |> 
+  select(-bins) |> 
   as.matrix()
 
 Tsample <- which(rowSums(Y) != 0)
 
 # set up X
 X <- all_composite |>
-  select(char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
-  mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp)) |> 
-  mutate(across(-c(humans, heinrich), ~ as.numeric(scale(.)))) |> 
+  select(bins, char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
+  arrange(desc(bins)) |> 
+  mutate(ocfs = sqrt(ocfs)) |> 
+  mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp),
+         across(-c(humans, heinrich, bins), ~ as.numeric(scale(.)))) |>
+  select(-bins) |> 
   as.matrix()
+
+which(is.na(X))
 
 matplot(X, type = 'l')
 
@@ -470,10 +503,24 @@ mnTS_mod_int_refit <- refit_func(mnTS_mod_int, 5)
 lapply(mnTS_mod_int_refit, coef)
 
 
+# bootstrapping -----------------------------------------------------------
+
+start_time <- Sys.time()
+
+future::plan(strategy = multisession, workers = 2)
+mods <- list(mnTS_mod= mnTS_mod_refit[[2]],
+             mnTS_mod_int = mnTS_mod_int_refit[[2]])
+
+res <- furrr::future_map(mods, multinomialTS::boot.mnTS, rep = 100,
+                         .options = furrr_options(seed = 1984))
+
+end_time <- Sys.time()
+end_time - start_time
+
 # Plotting ----------------------------------------------------------------
 
-ssms <- list(mnTS_mod = mnTS_mod_refit[[2]],
-             mnTS_mod_int = mnTS_mod_int_refit[[2]])
+ssms <- list(mnTS_mod = mnTS_mod_refit[[3]],
+             mnTS_mod_int = mnTS_mod_int_refit[[1]])
 
 wald <- lapply(ssms, \(hyp) {
   wald <- coef(hyp)
