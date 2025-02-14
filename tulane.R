@@ -2,6 +2,9 @@ if (!require("pacman")) install.packages("pacman", repos="http://cran.r-project.
 pacman::p_load(multinomialTS, tidyverse, ggtext, patchwork, forecast,
                future, furrr, viridis, viridisLite, RColorBrewer)
 
+
+# Data hanling ------------------------------------------------------------
+
 # Function to re-fit the model if necessary
 refit_func <- function(mod, n_refit = 10) {
   
@@ -65,8 +68,6 @@ bin_width = 200
 # Load pollen data
 grimm_06_pollen <- readRDS("./data/tula94_pollen_files/grimm_06_pollen.rds")
 nora_pollen_wide <- read_csv("./data/tula94_pollen_files/tula94_pollen_wide_count.csv")
-nora_pollen_wide <- nora_pollen_wide |>
-  arrange(new_age)
 
 # Tulane 2020 core
 chron <- read_csv("./data/TULA20_age-depth_files/TULA20_compsiteCore_w-ages.csv")
@@ -508,19 +509,19 @@ lapply(mnTS_mod_int_refit, coef)
 start_time <- Sys.time()
 
 future::plan(strategy = multisession, workers = 2)
-mods <- list(mnTS_mod= mnTS_mod_refit[[2]],
-             mnTS_mod_int = mnTS_mod_int_refit[[2]])
+mods <- list(mnTS_mod= mnTS_mod_refit[[5]],
+             mnTS_mod_int = mnTS_mod_int_refit[[3]])
 
 res <- furrr::future_map(mods, multinomialTS::boot.mnTS, rep = 100,
                          .options = furrr_options(seed = 1984))
-
+# saveRDS(res, "./results/bootstraps.rds")
 end_time <- Sys.time()
 end_time - start_time
 
 # Plotting ----------------------------------------------------------------
 
-ssms <- list(mnTS_mod = mnTS_mod_refit[[3]],
-             mnTS_mod_int = mnTS_mod_int_refit[[1]])
+ssms <- list(mnTS_mod = mnTS_mod_refit[[5]],
+             mnTS_mod_int = mnTS_mod_int_refit[[3]])
 
 wald <- lapply(ssms, \(hyp) {
   wald <- coef(hyp)
@@ -597,3 +598,70 @@ C_plot
 #   theme(
 #     text = element_text(size = 10),
 #   )
+
+## Bootstrap plotting -----------------------------------------------------
+
+X_names_list <- c(
+  char_acc ="Carcoal accumulation",
+  d18O = "&delta;<sup>18</sup>O",
+  heinrich ="Heinrich events",
+  mean_co2 ="CO<sub>2</sub>",
+  ocfs ="Fungal spores"
+)
+
+mods_boot <- map(res, ~ {
+  as_tibble(.x[[2]]) |> 
+  pivot_longer(-c(logLik, opt.convergence))
+}) |> 
+  bind_rows(.id = "hyp")
+
+mods_boot_68 <- mods_boot |> 
+#  filter(opt.convergence == 0) |> 
+  group_by(hyp, name) |> 
+  summarise(boot_mean = mean(value),
+            boot_sd = sd(value),
+            upper_68 = quantile(value, probs = 0.84),
+            lower_68 = quantile(value, probs = 0.16)) |> 
+  mutate(t_scores = boot_mean / boot_sd,
+         p_vals = 2 * pnorm(q = abs(t_scores), lower.tail = F),
+         sig = p_vals < 0.05)
+
+
+mods_boot_68_B <- mods_boot_68 %>% 
+  filter(grepl(paste(names(X_names_list), collapse = "|"), name)) %>% 
+  separate_wider_delim(cols = name, delim = ".", names = c("cov", "name")) %>%
+  mutate(name = case_when(name == "y2" ~ "Grass",
+                          name == "y3" ~ "Herbs",
+                          name == "y4" ~ "Pinus",
+                          name == "y5" ~ "Quercus",
+                          .default = as.factor(name)),
+         name = fct(name))
+
+boot_plot_int <- ggplot(mods_boot_68_B %>% filter(hyp == "mnTS_mod_int"), aes(x = name, y = boot_mean, colour = as_factor(sig))) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lower_68, ymax = upper_68)) +
+  scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
+                     values = c("#BF0606", "#5ab4ac")) +
+  labs(x = "Taxa", y = "Coefficient", title = "With interactions") +
+  facet_wrap(~ cov, labeller = as_labeller(X_names_list)) +
+  theme_bw() +
+  theme(
+    strip.text = element_markdown(),
+    strip.background = element_rect(fill = NA)
+  )
+
+boot_plot <- ggplot(mods_boot_68_B %>% filter(hyp == "mnTS_mod"), aes(x = as_factor(name), y = boot_mean, colour = as_factor(sig))) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lower_68, ymax = upper_68)) +
+  scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
+                     values = c("#BF0606", "#5ab4ac")) +
+  labs(x = "Taxa", y = "Coefficient", title = "Without interactions") +
+  facet_wrap(~ cov, labeller = as_labeller(X_names_list)) +
+  theme_bw() +
+  theme(
+    strip.text = element_markdown(),
+    strip.background = element_rect(fill = NA)
+  )
+
+
+boot_plot_int / boot_plot
