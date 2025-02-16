@@ -173,7 +173,7 @@ pollen_wide <- grimm_06_groups |>
 # check_ages <- full_join(pollen_wide, nora_poll, by = c("grimm_depth" = "nora_depth"))
 
 # Plot counts
-# Yes, they counted >500 quercus in that spike...
+# Yes, they counted >500 quercus in that spike... crazy
 pollen_wide |>
   pivot_longer(-c(age, grimm_depth, grimm_age)) |> 
   ggplot(aes(x = age, y = value)) +
@@ -508,13 +508,15 @@ lapply(mnTS_mod_int_refit, coef)
 
 start_time <- Sys.time()
 
-future::plan(strategy = multisession, workers = 2)
-mods <- list(mnTS_mod= mnTS_mod_refit[[5]],
-             mnTS_mod_int = mnTS_mod_int_refit[[3]])
+future::plan(strategy = multisession, workers = 10)
+mods <- c(setNames(rep(list(mnTS_mod_refit[[5]]), 5),
+                    paste0("mnTS_mod", 1:5)),
+          setNames(rep(list(mnTS_mod_int_refit[[3]]), 5),
+                     paste0("mnTS_mod_int", 1:5)))
 
-res <- furrr::future_map(mods, multinomialTS::boot.mnTS, rep = 100,
+res <- furrr::future_map(mods, multinomialTS::boot.mnTS, rep = 200,
                          .options = furrr_options(seed = 1984))
-# saveRDS(res, "./results/bootstraps.rds")
+saveRDS(res, "./results/bootstraps_1000.rds")
 end_time <- Sys.time()
 end_time - start_time
 
@@ -527,11 +529,11 @@ wald <- lapply(ssms, \(hyp) {
   wald <- coef(hyp)
   as_tibble(wald, rownames = "cov")
 })
-wald_bind <- bind_rows(wald, .id = "hyp") %>% 
+wald_bind <- bind_rows(wald, .id = "hyp") |> 
   mutate(sig = P < 0.05,
          hyp = forcats::fct(hyp))
 
-wald_bind_x <- wald_bind %>% 
+wald_bind_x <- wald_bind |> 
   filter(!grepl("sp.|^Grass|^Herbs|^Pinus|^Quercus", cov))
 
 
@@ -551,7 +553,7 @@ B_plot <- ggplot(wald_bind_x, aes(x = hyp, y = Coef., colour = as_factor(sig))) 
 
 B_plot
 
-wald_bind_c <- wald_bind %>% 
+wald_bind_c <- wald_bind |> 
   filter(grepl("sp.", cov))
 
 C_plot <- ggplot(wald_bind_c, aes(x = as_factor(cov), y = Coef., colour = as_factor(sig))) +
@@ -613,7 +615,8 @@ mods_boot <- map(res, ~ {
   as_tibble(.x[[2]]) |> 
   pivot_longer(-c(logLik, opt.convergence))
 }) |> 
-  bind_rows(.id = "hyp")
+  bind_rows(.id = "hyp") |> 
+  mutate(hyp = str_remove(hyp, pattern = '[[:digit:]]+'))
 
 mods_boot_68 <- mods_boot |> 
 #  filter(opt.convergence == 0) |> 
@@ -625,42 +628,83 @@ mods_boot_68 <- mods_boot |>
   mutate(t_scores = boot_mean / boot_sd,
          p_vals = 2 * pnorm(q = abs(t_scores), lower.tail = F),
          sig = p_vals < 0.05)
+#
+
+mods_boot_table <- mods_boot_68 |> 
+  mutate(name = str_replace_all(name, 
+    pattern = "y1|y2|y3|y4|y5", 
+    replacement = function(x) case_when(
+      x == "y1" ~ "Other",
+      x == "y2" ~ "Grass",
+      x == "y3" ~ "Herbs",
+      x == "y4" ~ "Pinus",
+      x == "y5" ~ "Quercus",
+      TRUE ~ x  # Keep other values unchanged
+    ))) |> 
+    filter(!str_detect(name, "v."))
 
 
-mods_boot_68_B <- mods_boot_68 %>% 
-  filter(grepl(paste(names(X_names_list), collapse = "|"), name)) %>% 
-  separate_wider_delim(cols = name, delim = ".", names = c("cov", "name")) %>%
-  mutate(name = case_when(name == "y2" ~ "Grass",
-                          name == "y3" ~ "Herbs",
-                          name == "y4" ~ "Pinus",
-                          name == "y5" ~ "Quercus",
-                          .default = as.factor(name)),
-         name = fct(name))
 
-boot_plot_int <- ggplot(mods_boot_68_B %>% filter(hyp == "mnTS_mod_int"), aes(x = name, y = boot_mean, colour = as_factor(sig))) +
+mods_boot_68_B <- mods_boot_68 |> 
+  filter(grepl(paste(names(X_names_list), collapse = "|"), name)) |> 
+  separate_wider_delim(cols = name, delim = ".", names = c("cov", "name")) |>
+  mutate(name = str_replace_all(name, 
+    pattern = "y2|y3|y4|y5", 
+    replacement = function(x) case_when(
+      x == "y2" ~ "Grass",
+      x == "y3" ~ "Herbs",
+      x == "y4" ~ "Pinus",
+      x == "y5" ~ "Quercus",
+      TRUE ~ x  # Keep other values unchanged
+    )))
+
+boot_plot_int <- ggplot(mods_boot_68_B |> filter(hyp == "mnTS_mod_int"),
+                        aes(x = name, y = boot_mean, colour = as_factor(sig))) +
   geom_point() +
-  geom_errorbar(aes(ymin = lower_68, ymax = upper_68)) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.2) +
+  geom_errorbar(aes(ymin = lower_68, ymax = upper_68),
+                    width = .2, alpha = 0.5) +
   scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
-                     values = c("#BF0606", "#5ab4ac")) +
-  labs(x = "Taxa", y = "Coefficient", title = "With interactions") +
+                     values = c("#202020", "#d80000")) +
+  labs(x = "Taxa", y = "Coefficient") +
   facet_wrap(~ cov, labeller = as_labeller(X_names_list)) +
   theme_bw() +
   theme(
-    strip.text = element_markdown(),
-    strip.background = element_rect(fill = NA)
+    strip.text = element_markdown(size = 8),
+    strip.background = element_rect(fill = NA),
+    legend.position = c(.85, .2),
+    axis.text = element_text(size = 8),
+    axis.title = element_text(size = 10),
+    legend.text = element_text(size = 8) 
   )
 
-boot_plot <- ggplot(mods_boot_68_B %>% filter(hyp == "mnTS_mod"), aes(x = as_factor(name), y = boot_mean, colour = as_factor(sig))) +
+ggsave(
+  "./results/boot_plot_int.svg",
+  boot_plot_int,
+  height = 15,
+  width = 20,
+  units = "cm",
+  device = svg
+  )
+
+boot_plot <- ggplot(mods_boot_68_B |> filter(hyp == "mnTS_mod"),
+                        aes(x = name, y = boot_mean, colour = as_factor(sig))) +
   geom_point() +
-  geom_errorbar(aes(ymin = lower_68, ymax = upper_68)) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.2) +
+  geom_errorbar(aes(ymin = lower_68, ymax = upper_68),
+                    width = .2, alpha = 0.5) +
   scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
-                     values = c("#BF0606", "#5ab4ac")) +
-  labs(x = "Taxa", y = "Coefficient", title = "Without interactions") +
+                     values = c("#202020", "#d80000")) +
+  labs(x = "Taxa", y = "Coefficient") +
   facet_wrap(~ cov, labeller = as_labeller(X_names_list)) +
   theme_bw() +
   theme(
-    strip.text = element_markdown(),
-    strip.background = element_rect(fill = NA)
+    strip.text = element_markdown(size = 8),
+    strip.background = element_rect(fill = NA),
+    legend.position = c(.85, .2),
+    axis.text = element_text(size = 8),
+    axis.title = element_text(size = 10),
+    legend.text = element_text(size = 8) 
   )
 
 
