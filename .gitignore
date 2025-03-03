@@ -2,3 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
+
+# Large files
+results/bootstraps_1000.rds

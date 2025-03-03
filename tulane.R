@@ -602,13 +602,15 @@ C_plot
 #   )
 
 ## Bootstrap plotting -----------------------------------------------------
+res <- readRDS("./results/bootstraps_1000.rds")
 
 X_names_list <- c(
-  char_acc ="Carcoal accumulation",
-  d18O = "&delta;<sup>18</sup>O",
-  heinrich ="Heinrich events",
-  mean_co2 ="CO<sub>2</sub>",
-  ocfs ="Fungal spores"
+  heinrich ="A: Heinrich events",
+  d18O = "B: &delta;<sup>18</sup>O",
+  mean_co2 ="C: CO<sub>2</sub>",
+  char_acc ="D: Charcoal accumulation",
+  ocfs ="E: Fungal spores",
+  humans = "F: Human presence"
 )
 
 mods_boot <- map(res, ~ {
@@ -653,59 +655,48 @@ mods_boot_68_B <- mods_boot_68 |>
     replacement = function(x) case_when(
       x == "y2" ~ "Grass",
       x == "y3" ~ "Herbs",
-      x == "y4" ~ "Pinus",
-      x == "y5" ~ "Quercus",
+      x == "y4" ~ "_Pinus_",
+      x == "y5" ~ "_Quercus_",
       TRUE ~ x  # Keep other values unchanged
-    )))
+    )),
+        name = fct(name, levels = c("Grass", "Herbs", "_Pinus_", "_Quercus_")),
+        cov = fct(cov, levels = c("heinrich", "d18O", "mean_co2", "char_acc", "ocfs", "humans")))
+
 
 boot_plot_int <- ggplot(mods_boot_68_B |> filter(hyp == "mnTS_mod_int"),
                         aes(x = name, y = boot_mean, colour = as_factor(sig))) +
-  geom_point() +
+  geom_point(size = 2) +
   geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.2) +
   geom_errorbar(aes(ymin = lower_68, ymax = upper_68),
-                    width = .2, alpha = 0.5) +
+                    width = .4, alpha = 0.5) +
   scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
                      values = c("#202020", "#d80000")) +
-  labs(x = "Taxa", y = "Coefficient") +
+  labs(x = "Taxa", y = "MultinomialTS coefficient estimate") +
   facet_wrap(~ cov, labeller = as_labeller(X_names_list)) +
   theme_bw() +
   theme(
-    strip.text = element_markdown(size = 8),
+    strip.text = element_markdown(size = 9),
     strip.background = element_rect(fill = NA),
-    legend.position = c(.85, .2),
-    axis.text = element_text(size = 8),
+    legend.position = "inside",
+    legend.position.inside = c(.09, .92),
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 8),
+    legend.background = element_rect(fill = NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_markdown(size = 8),
     axis.title = element_text(size = 10),
-    legend.text = element_text(size = 8) 
+    panel.spacing.x=unit(0, "lines"),
+    panel.spacing.y=unit(0, "lines") 
   )
+boot_plot_int
+
 
 ggsave(
   "./results/boot_plot_int.svg",
   boot_plot_int,
   height = 15,
-  width = 20,
+  width = 14,
   units = "cm",
   device = svg
   )
-
-boot_plot <- ggplot(mods_boot_68_B |> filter(hyp == "mnTS_mod"),
-                        aes(x = name, y = boot_mean, colour = as_factor(sig))) +
-  geom_point() +
-  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.2) +
-  geom_errorbar(aes(ymin = lower_68, ymax = upper_68),
-                    width = .2, alpha = 0.5) +
-  scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
-                     values = c("#202020", "#d80000")) +
-  labs(x = "Taxa", y = "Coefficient") +
-  facet_wrap(~ cov, labeller = as_labeller(X_names_list)) +
-  theme_bw() +
-  theme(
-    strip.text = element_markdown(size = 8),
-    strip.background = element_rect(fill = NA),
-    legend.position = c(.85, .2),
-    axis.text = element_text(size = 8),
-    axis.title = element_text(size = 10),
-    legend.text = element_text(size = 8) 
-  )
-
-
-boot_plot_int / boot_plot
