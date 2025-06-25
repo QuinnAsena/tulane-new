@@ -94,10 +94,10 @@ colnames(core_20_spore) <- c("depth" , "ocfs")
 # graminoids/grass
 # Herbs/Forbs
 herbs <- c("Apiaceae.*|Ambrosia.*|Artemisia.*|Asteraceae.*|
-              Tubuliflorae.*|Brassicaceae.*|Caryophyllaceae.*|
-              Chenopodiaceae.*|Amaranthaceae.*|Dryas.*|Ephedra.*|
-              Eriogonum.*|Euphorbiaceae.*|Oxyria.*|Ranunculaceae.*|
-              Sarcobatus.*|Saxifragaceae.*")
+            Tubuliflorae.*|Brassicaceae.*|Caryophyllaceae.*|
+            Chenopodiaceae.*|Amaranthaceae.*|Dryas.*|Ephedra.*|
+            Eriogonum.*|Euphorbiaceae.*|Oxyria.*|Ranunculaceae.*|
+            Sarcobatus.*|Saxifragaceae.*")
 
 grass <- c("Cyperaceae.*|Poaceae.*")
 
@@ -514,7 +514,7 @@ mods <- c(setNames(rep(list(mnTS_mod_refit[[5]]), 5),
           setNames(rep(list(mnTS_mod_int_refit[[3]]), 5),
                      paste0("mnTS_mod_int", 1:5)))
 
-res <- furrr::future_map(mods, multinomialTS::boot.mnTS, rep = 200,
+res <- furrr::future_map(mods, multinomialTS::boot, rep = 200,
                          .options = furrr_options(seed = 1984))
 saveRDS(res, "./results/bootstraps_1000.rds")
 end_time <- Sys.time()
@@ -698,5 +698,302 @@ ggsave(
   height = 15,
   width = 14,
   units = "cm",
+  device = svg)
+
+
+# Without holocene --------------------------------------------------------
+all_composite_woholo <- all_composite |>
+  filter(bins >= 54) |>
+  arrange(desc(bins))
+
+# Without interactions ----------------------------------------------------
+
+# set up Y
+Y <- all_composite_woholo |>
+  select(bins, other, Grass, Herbs, Pinus, Quercus) |>
+  arrange(desc(bins)) |> 
+  select(-bins) |> 
+  as.matrix()
+
+Tsample <- which(rowSums(Y) != 0)
+
+# set up X
+X <- all_composite_woholo |>
+  select(bins, char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
+  arrange(desc(bins)) |> 
+  mutate(ocfs = sqrt(ocfs)) |> 
+  mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp),
+         across(-c(humans, heinrich, bins), ~ as.numeric(scale(.)))) |>
+  select(-bins) |> 
+  as.matrix()
+
+which(is.na(X))
+
+matplot(X, type = 'l')
+
+p <- ncol(X) + 1 # Number of independent variables plus intercept
+n <- ncol(Y)
+
+V.fixed = diag(n) # Covariance matrix of environmental variation in process eq
+# V.fixed = matrix(NA, n, n)
+# V.fixed[1] = 1
+
+B.fixed <- matrix(c(rep(0,p),rep(NA, (n - 1) * p)), p, n)
+B.start <- matrix(c(rep(0,p),rep(.01, (n - 1) * p)), p, n)
+
+glmm_mod <- multinomialTS::mnGLMM(Y = Y[which(rowSums(Y) != 0),],
+                                  X = X[which(rowSums(Y) != 0), ,drop = F],
+                                  B.start = B.start, B.fixed = B.fixed,
+                                  V.fixed = V.fixed)
+summary(glmm_mod)
+
+B0.start <- glmm_mod$B[1, , drop = F]
+B.start <- glmm_mod$B[2:p, , drop = F]
+
+sigma.start <- glmm_mod$sigma
+
+V.fixed = matrix(NA, n, n) # Covariance matrix of environmental variation in process eq
+V.fixed[1] = 1
+
+V.start <- glmm_mod$V
+# V.start <- diag(diag(V.start))
+
+B.fixed <- matrix(NA, ncol(X), n)
+B.fixed[,1] <- 0
+B0.fixed = matrix(c(0, rep(NA, n - 1)), nrow = 1, ncol = n)
+
+# Set-up C without interactions
+C.start.diag = .5 * diag(n)
+C.fixed.diag <- C.start.diag
+C.fixed.diag[C.fixed.diag != 0] <- NA
+
+
+# Model with no interactions
+start_time <- Sys.time()
+mnTS_mod <- mnTS(Y = Y[Tsample, ],
+                 X = X, Tsample = Tsample,
+                 B0.start = B0.start, B0.fixed = B0.fixed,
+                 B.start = B.start, B.fixed = B.fixed,
+                 C.start = C.start.diag, C.fixed = C.fixed.diag,
+                 V.start = V.start, V.fixed = V.fixed,
+                 dispersion.fixed = 1, maxit.optim = 1e+6)
+
+end_time <- Sys.time()
+end_time - start_time
+
+mnTS_mod_refit <- refit_func(mnTS_mod, 5)
+lapply(mnTS_mod_refit, coef)
+
+# With interactions -------------------------------------------------------
+
+C.start.diag.int = .5 * diag(n)
+C.start.diag.int[4, 5] = C.start.diag.int[5, 4] = .5
+
+C.fixed.diag.int <- C.start.diag.int
+C.fixed.diag.int[C.fixed.diag.int != 0] <- NA
+
+
+start_time <- Sys.time()
+mnTS_mod_int <- mnTS(Y = Y[Tsample, ],
+                     X = X, Tsample = Tsample,
+                     B0.start = mnTS_mod$B0, B0.fixed = B0.fixed,
+                     B.start = mnTS_mod$B, B.fixed = B.fixed,
+                     C.start = C.start.diag.int, C.fixed = C.fixed.diag.int,
+                     V.start = mnTS_mod$V, V.fixed = V.fixed,
+                     dispersion.fixed = 1, maxit.optim = 1e+6)
+
+end_time <- Sys.time()
+end_time - start_time
+
+mnTS_mod_int_refit <- refit_func(mnTS_mod_int, 5)
+lapply(mnTS_mod_int_refit, coef)
+
+
+# bootstrapping -----------------------------------------------------------
+
+start_time <- Sys.time()
+
+future::plan(strategy = multisession, workers = 10)
+mods <- c(setNames(rep(list(mnTS_mod_refit[[5]]), 5),
+                    paste0("mnTS_mod", 1:5)),
+          setNames(rep(list(mnTS_mod_int_refit[[3]]), 5),
+                     paste0("mnTS_mod_int", 1:5)))
+
+res <- furrr::future_map(mods, multinomialTS::boot, rep = 200,
+                         .options = furrr_options(seed = 1984))
+saveRDS(res, "./results/woholo_bootstraps_1000.rds")
+end_time <- Sys.time()
+end_time - start_time
+
+
+## Bootstrap plotting supp info --------------------------------------------
+
+res_woholo <- readRDS("./results/woholo_bootstraps_1000.rds")
+res <- readRDS("./results/bootstraps_1000.rds")
+
+# check on convergence
+lapply(res_woholo, \(f) {
+  x <- f$all_mods_pars
+  sum(x[ ,colnames(x) %in% "opt.convergence"])
+})
+
+names(res_woholo) <- paste0(names(res_woholo), "_woholo")
+res <- c(res, res_woholo)
+
+mods_boot <- map(res, ~ {
+  as_tibble(.x[[2]]) |> 
+  pivot_longer(-c(logLik, opt.convergence))
+}) |> 
+  bind_rows(.id = "hyp") |> 
+  mutate(hyp = str_remove(hyp, pattern = '[[:digit:]]+'))
+
+X_names_list <- c(
+  heinrich ="A: Heinrich events",
+  d18O = "B: &delta;<sup>18</sup>O",
+  mean_co2 ="C: CO<sub>2</sub>",
+  char_acc ="D: Charcoal accumulation",
+  ocfs ="E: Fungal spores",
+  humans = "F: Human presence"
+)
+
+mods_boot <- map(res, ~ {
+  as_tibble(.x[[2]]) |> 
+  pivot_longer(-c(logLik, opt.convergence))
+}) |> 
+  bind_rows(.id = "hyp") |> 
+  mutate(hyp = str_remove(hyp, pattern = '[[:digit:]]+'))
+
+mods_boot_68 <- mods_boot |> 
+#  filter(opt.convergence == 0) |> 
+  group_by(hyp, name) |> 
+  summarise(boot_mean = mean(value),
+            boot_sd = sd(value),
+            upper_68 = quantile(value, probs = 0.84),
+            lower_68 = quantile(value, probs = 0.16)) |> 
+  mutate(t_scores = boot_mean / boot_sd,
+         p_vals = 2 * pnorm(q = abs(t_scores), lower.tail = F),
+         sig = p_vals < 0.05)
+#
+
+mods_boot_table <- mods_boot_68 |> 
+  mutate(name = str_replace_all(name, 
+    pattern = "y1|y2|y3|y4|y5", 
+    replacement = function(x) case_when(
+      x == "y1" ~ "Other",
+      x == "y2" ~ "Grass",
+      x == "y3" ~ "Herbs",
+      x == "y4" ~ "Pinus",
+      x == "y5" ~ "Quercus",
+      TRUE ~ x  # Keep other values unchanged
+    ))) |> 
+    filter(!str_detect(name, "v."))
+
+
+
+mods_boot_68_B <- mods_boot_68 |> 
+  filter(grepl(paste(names(X_names_list), collapse = "|"), name)) |> 
+  separate_wider_delim(cols = name, delim = ".", names = c("cov", "name")) |>
+  mutate(name = str_replace_all(name, 
+    pattern = "y2|y3|y4|y5", 
+    replacement = function(x) case_when(
+      x == "y2" ~ "Grass",
+      x == "y3" ~ "Herbs",
+      x == "y4" ~ "_Pinus_",
+      x == "y5" ~ "_Quercus_",
+      TRUE ~ x  # Keep other values unchanged
+    )),
+        name = fct(name, levels = c("Grass", "Herbs", "_Pinus_", "_Quercus_")),
+        cov = fct(cov, levels = c("heinrich", "d18O", "mean_co2", "char_acc", "ocfs", "humans")))
+
+
+boot_plot <- ggplot(mods_boot_68_B, aes(x = name, y = boot_mean, colour = as_factor(sig), shape = as_factor(hyp))) +
+  geom_point(position = position_dodge(width = 0.6), size = 2) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.2) +
+  geom_errorbar(aes(ymin = lower_68, ymax = upper_68),
+                    width = .4, alpha = 0.5, position = position_dodge(width = 0.6)) +
+  scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
+                     values = c("#202020", "#d80000")) +
+  scale_shape_manual(name = NULL, labels = c(
+    "With species interaction", " Without species interaction",
+    "With species interaction, without Holocene", " Without species interaction, without Holocene"),
+                     values = c(17, 19, 2, 1)) +
+  guides(shape = guide_legend(nrow = 2,byrow = TRUE)) +
+  labs(x = "Taxa", y = "MultinomialTS coefficient estimate") +
+  facet_wrap(~ cov, labeller = as_labeller(X_names_list)) +
+  theme_bw() +
+  theme(
+    strip.text = element_markdown(size = 9),
+    strip.background = element_rect(fill = NA),
+    legend.position = "bottom",
+    # legend.position = "inside",
+    # legend.position.inside = c(.09, .92),
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 8),
+    legend.background = element_rect(fill = NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_markdown(size = 8),
+    axis.title = element_text(size = 10),
+    panel.spacing.x=unit(0, "lines"),
+    panel.spacing.y=unit(0, "lines")
+  )
+boot_plot
+
+
+ggsave(
+  "./results/boot_plot_all.svg",
+  boot_plot,
+  height = 19,
+  width = 27,
+  units = "cm",
   device = svg
   )
+
+
+## Bootstrap C plotting supp info ------------------------------------------
+
+mods_boot_68_C <- mods_boot_68 |>
+  filter(grepl("sp.", name)) |>
+  mutate(name = str_replace_all(name, 
+    pattern = "y1|y2|y3|y4|y5", 
+    replacement = function(x) case_when(
+      x == "y1" ~ "Other",
+      x == "y2" ~ "Grass",
+      x == "y3" ~ "Herbs",
+      x == "y4" ~ "_Pinus_",
+      x == "y5" ~ "_Quercus_",
+      TRUE ~ x
+    )),
+   name = str_remove(name, "sp."),
+   name = fct(name, levels = c("Other.Other", "Grass.Grass", "Herbs.Herbs",
+                                "_Pinus_._Pinus_", "_Quercus_._Quercus_",
+                                "_Pinus_._Quercus_", "_Quercus_._Pinus_")))
+
+
+mods_boot_68_C_plot <- ggplot(mods_boot_68_C |> filter(hyp %in% c("mnTS_mod_int", "mnTS_mod_int_woholo")), aes(x = name, y = boot_mean, colour = as_factor(sig), shape = as_factor(hyp))) +
+  geom_point(position = position_dodge(width = 0.6), size = 2) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.2) +
+  geom_errorbar(aes(ymin = lower_68, ymax = upper_68),
+                    width = .4, alpha = 0.5, position = position_dodge(width = 0.6)) +
+  scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
+                     values = c("#202020", "#d80000")) +
+  scale_shape_manual(name = NULL, labels = c("With Holocene", " Without Holocene"), values = c(17, 2)) +
+  labs(x = "Taxa", y = "MultinomialTS coefficient estimate") +
+  # facet_wrap(~ hyp) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 8),
+    legend.background = element_rect(fill = NA),
+    axis.text = element_markdown(size = 8, angle = 45, hjust = 1),
+    axis.title = element_text(size = 10))
+
+
+ggsave(
+  "./results/boot_plot_C_SI.svg",
+  mods_boot_68_C_plot,
+  height = 15,
+  width = 14,
+  units = "cm",
+  device = svg)
