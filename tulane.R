@@ -700,6 +700,13 @@ ggsave(
   units = "cm",
   device = svg)
 
+ggsave(
+  "./results/boot_plot_int.png",
+  boot_plot_int,
+  height = 15,
+  width = 14,
+  units = "cm",
+  device = png)
 
 # Without holocene --------------------------------------------------------
 all_composite_woholo <- all_composite |>
@@ -946,9 +953,15 @@ ggsave(
   height = 19,
   width = 27,
   units = "cm",
-  device = svg
-  )
+  device = svg)
 
+ggsave(
+  "./results/boot_plot_all.png",
+  boot_plot,
+  height = 19,
+  width = 27,
+  units = "cm",
+  device = png)
 
 ## Bootstrap C plotting supp info ------------------------------------------
 
@@ -997,3 +1010,12 @@ ggsave(
   width = 14,
   units = "cm",
   device = svg)
+
+
+ggsave(
+  "./results/boot_plot_C_SI.png",
+  mods_boot_68_C_plot,
+  height = 15,
+  width = 14,
+  units = "cm",
+  device = png)
