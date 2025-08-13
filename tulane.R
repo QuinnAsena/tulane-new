@@ -72,7 +72,8 @@ nora_pollen_wide <- read_csv("./data/tula94_pollen_files/tula94_pollen_wide_coun
 # Tulane 2020 core
 chron <- read_csv("./data/TULA20_age-depth_files/TULA20_compsiteCore_w-ages.csv")
 core_20_char <- read_csv("./data/TULA20_age-depth_files/TULA20_CHAR_w-ages.csv")
-core_20_spore <- read_csv("./data/TULA20_age-depth_files/TULA20_CFS_w-ages.csv")
+# core_20_spore <- read_csv("./data/TULA20_age-depth_files/TULA20_CFS_w-ages.csv")
+core_20_spore <- read_csv("./data/TULA20_age-depth_files/ocfs_uncertainty.csv")
 # Isotope cores
 co2 <- read_csv("./data/isotope/co2_merged.csv")
 oxy18 <- read_csv("./data/isotope/ngrip-d18o-50yr.csv")
@@ -85,9 +86,14 @@ core_20_char <- core_20_char |>
   select(depth_composite, accu_rate)
 colnames(core_20_char) <- c("depth", "char_acc")
 
+# core_20_spore <- core_20_spore |> 
+#   select(depth_composite, `OCFS Concentration`)
+# colnames(core_20_spore) <- c("depth" , "ocfs")
 core_20_spore <- core_20_spore |> 
-  select(depth_composite, `OCFS Concentration`)
-colnames(core_20_spore) <- c("depth" , "ocfs")
+  select(OCFS_conc, depth_core)
+colnames(core_20_spore) <- c("ocfs", "depth")
+
+
 
 # Handling state-variables
 # Variations in tree cover in North America since the LGM
@@ -216,11 +222,11 @@ composite_covariate_join <- chron |>
   mutate(heinrich = NA,
          heinrich = case_when(cov_age <= 62400 & cov_age >= 59700 ~ 1,
                               cov_age <= 49300 & cov_age >= 47600 ~ 1,
-                              cov_age <= 40200 & cov_age >= 36800 ~ 1,
+                              cov_age <= 40200 & cov_age >= 38300 ~ 1,
                               cov_age <= 31300 & cov_age >= 30000 ~ 1,
                               cov_age <= 24700 & cov_age >= 23400 ~ 1,
                               cov_age <= 18300 & cov_age >= 15100 ~ 1,
-                              cov_age <= 12900 & cov_age >= 11000 ~ 1,
+                              cov_age <= 12900 & cov_age >= 11600 ~ 1,
                               .default = NA),
          humans = NA,
          humans = case_when(cov_age  <= 14500 ~ 1, .default = NA)) |> 
@@ -509,9 +515,9 @@ lapply(mnTS_mod_int_refit, coef)
 start_time <- Sys.time()
 
 future::plan(strategy = multisession, workers = 10)
-mods <- c(setNames(rep(list(mnTS_mod_refit[[5]]), 5),
+mods <- c(setNames(rep(list(mnTS_mod_refit[[2]]), 5),
                     paste0("mnTS_mod", 1:5)),
-          setNames(rep(list(mnTS_mod_int_refit[[3]]), 5),
+          setNames(rep(list(mnTS_mod_int_refit[[2]]), 5),
                      paste0("mnTS_mod_int", 1:5)))
 
 res <- furrr::future_map(mods, multinomialTS::boot, rep = 200,
@@ -645,7 +651,7 @@ mods_boot_table <- mods_boot_68 |>
     ))) |> 
     filter(!str_detect(name, "v."))
 
-
+# write.csv(mods_boot_table, "./results/boot_coef.csv")
 
 mods_boot_68_B <- mods_boot_68 |> 
   filter(grepl(paste(names(X_names_list), collapse = "|"), name)) |> 
@@ -707,6 +713,7 @@ ggsave(
   width = 14,
   units = "cm",
   device = png)
+
 
 # Without holocene --------------------------------------------------------
 all_composite_woholo <- all_composite |>
@@ -821,9 +828,9 @@ lapply(mnTS_mod_int_refit, coef)
 start_time <- Sys.time()
 
 future::plan(strategy = multisession, workers = 10)
-mods <- c(setNames(rep(list(mnTS_mod_refit[[5]]), 5),
+mods <- c(setNames(rep(list(mnTS_mod_refit[[1]]), 5),
                     paste0("mnTS_mod", 1:5)),
-          setNames(rep(list(mnTS_mod_int_refit[[3]]), 5),
+          setNames(rep(list(mnTS_mod_int_refit[[1]]), 5),
                      paste0("mnTS_mod_int", 1:5)))
 
 res <- furrr::future_map(mods, multinomialTS::boot, rep = 200,
@@ -895,6 +902,7 @@ mods_boot_table <- mods_boot_68 |>
     ))) |> 
     filter(!str_detect(name, "v."))
 
+# write.csv(mods_boot_table, "./results/boot_coef_allmods.csv")
 
 
 mods_boot_68_B <- mods_boot_68 |> 
@@ -1019,3 +1027,151 @@ ggsave(
   width = 14,
   units = "cm",
   device = png)
+
+
+# Covariate and pollen plots ----------------------------------------------
+
+X_names_list2 <- c(
+  heinrich ="Heinrich",
+  d18O = "&delta;<sup>18</sup>O",
+  mean_co2 ="CO<sub>2</sub>",
+  char_acc ="Charcoal",
+  ocfs ="Spores",
+  humans = "Human"
+)
+
+cov_plot <- all_composite |>
+  select(bins, char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
+  mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp)) |> 
+  pivot_longer(-c(bins)) |> 
+  ggplot(aes(x = bins, y = value)) +
+  geom_point(size = 0.4) +
+  geom_line(linewidth = 0.3) +
+  scale_x_reverse() +
+  scale_y_continuous(breaks = scales::breaks_pretty(2)) +
+  coord_flip() +
+  facet_wrap(~name, scales = "free", nrow = 1,labeller = as_labeller(X_names_list2)) +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 10),
+    strip.text = element_markdown(size = 9),
+    axis.text.y = element_blank(),
+    axis.title.y = element_blank())
+
+
+all_composite_plot <- all_composite |>
+  select(age, bins, other, Grass, Herbs, Pinus, Quercus) |>
+  pivot_longer(-c(age, bins)) |>
+  mutate(name = str_replace_all(name, 
+                                pattern = "Pinus|Quercus", 
+                                replacement = function(x) case_when(
+                                  x == "Pinus" ~ "_Pinus_",
+                                  x == "Quercus" ~ "_Quercus_",
+                                  TRUE ~ x
+                                )),
+         name = fct(name, levels = c("other", "Grass", "Herbs", "_Pinus_", "_Quercus_")))
+
+pol_count_plot <- ggplot(all_composite_plot, aes(x = age, y = value)) +
+  geom_area(colour = "grey90") +
+  geom_segment(data = all_composite_plot,
+               aes(x = age, xend = age,
+                   y = 0, yend = value), colour = "grey30", linewidth = 0.6) +
+  scale_x_reverse() +
+  coord_flip() +
+  ylim(0, 400) +
+  labs(y = "Pollen counts", x = "Time (ybp)") +
+  facet_wrap(~name,
+             nrow = 1) +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 10),
+    strip.text = element_markdown()
+  )
+
+tulane_esa <- pol_count_plot + cov_plot + plot_layout(widths = c(0.6, 0.4))
+ggsave(
+  filename = "../esa-2025/figures/tulane_esa.svg",
+  plot = tulane_esa,
+  device = "svg",
+  width = 10.67,
+  height = 6,
+  units = "in"
+)
+
+
+
+###
+
+boot_C_plot_int <- mods_boot_68_C |>
+  filter(
+    hyp %in% c("mnTS_mod_int"),
+    name %in% c("_Pinus_._Quercus_", "_Quercus_._Pinus_")
+  ) %>%
+  mutate(panel = "Interaction coefficients") %>%  # fake facet label
+  ggplot(aes(x = name, y = boot_mean)) +
+  geom_point(position = position_dodge(width = 0.6), size = 2) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.2) +
+  geom_errorbar(
+    aes(ymin = lower_68, ymax = upper_68),
+    width = .4, alpha = 0.5, position = position_dodge(width = 0.6)
+  ) +
+  labs(x = "Taxa", y = NULL) +
+  facet_wrap(~panel) +  # adds strip title
+  theme_bw() +
+  theme(
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 8),
+    legend.background = element_rect(fill = NA),
+    axis.text = element_markdown(size = 8, angle = 45, hjust = 1),
+    axis.title = element_text(size = 10),
+    strip.background = element_rect(fill = NA),
+  )
+
+
+
+X_names_list3 <- c(
+  heinrich ="Heinrich events",
+  d18O = "&delta;<sup>18</sup>O",
+  mean_co2 ="CO<sub>2</sub>",
+  char_acc ="Charcoal accumulation",
+  ocfs ="Fungal spores",
+  humans = "Human presence"
+)
+boot_plot_int2 <- ggplot(mods_boot_68_B |> filter(hyp == "mnTS_mod_int"),
+                        aes(x = name, y = boot_mean, colour = as_factor(sig))) +
+  geom_point(size = 2) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.2) +
+  geom_errorbar(aes(ymin = lower_68, ymax = upper_68),
+                width = .4, alpha = 0.5) +
+  scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
+                     values = c("#202020", "#d80000")) +
+  labs(x = "Taxa", y = "MultinomialTS coefficient estimate") +
+  facet_wrap(~ cov, labeller = as_labeller(X_names_list3)) +
+  theme_bw() +
+  theme(
+    strip.text = element_markdown(size = 9),
+    strip.background = element_rect(fill = NA),
+    legend.position = "inside",
+    legend.position.inside = c(.09, .92),
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 8),
+    legend.background = element_rect(fill = NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_markdown(size = 8),
+    axis.title = element_text(size = 10),
+    panel.spacing.x=unit(0, "lines"),
+    panel.spacing.y=unit(0, "lines") 
+  )
+boot_plot_int2
+
+tulane_B_C_ESA <- boot_plot_int2 + boot_C_plot_int + plot_layout(widths = c(0.8, 0.2))
+
+ggsave(
+  filename = "../esa-2025/figures/tulane_B_C_ESA.svg",
+  plot = tulane_B_C_ESA,
+  device = "svg",
+  width = 10,
+  height = 6,
+  units = "in"
+)
