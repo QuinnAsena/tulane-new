@@ -227,9 +227,7 @@ composite_covariate_join <- chron |>
                               cov_age <= 24700 & cov_age >= 23400 ~ 1,
                               cov_age <= 18300 & cov_age >= 15100 ~ 1,
                               cov_age <= 12900 & cov_age >= 11600 ~ 1,
-                              .default = NA),
-         humans = NA,
-         humans = case_when(cov_age  <= 14500 ~ 1, .default = NA)) |> 
+                              .default = NA)) |>
   arrange(desc(cov_age))
 # Binary variables left as NA for summarise later
 dim(composite_covariate_join)
@@ -264,10 +262,8 @@ composite_covariate_join_bin <- bind_cols(bins = cov_bins, composite_covariate_j
     cov_age = mean(cov_age, na.rm = T),
     char_acc = mean(char_acc, na.rm = T),
     heinrich = mean(heinrich, na.rm = T),
-    humans = mean(humans, na.rm = T),
     ocfs = mean(ocfs, na.rm = T)) |> 
-  mutate(heinrich = ifelse(is.nan(heinrich), 0, heinrich),
-         humans = ifelse(is.nan(humans), 0, humans)) |>
+  mutate(heinrich = ifelse(is.nan(heinrich), 0, heinrich)) |>
   arrange(desc(cov_age))
 
 
@@ -336,7 +332,7 @@ all_composite <- pollen_wide_binned |>
 
 
 all_composite |> 
-  select(bins, char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
+  select(bins, char_acc, ocfs, d18O, heinrich, mean_co2) |> 
   pivot_longer(-c(bins)) |> 
   ggplot(aes(x = bins, y = value)) +
   geom_point() +
@@ -344,7 +340,7 @@ all_composite |>
   facet_wrap(~name, scales = "free", ncol = 1)
 
 all_composite |> 
-  select(bins, char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
+  select(bins, char_acc, ocfs, d18O, heinrich, mean_co2) |> 
   mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp)) |> 
   pivot_longer(-c(bins)) |> 
   ggplot(aes(x = bins, y = value)) +
@@ -353,9 +349,9 @@ all_composite |>
   facet_wrap(~name, scales = "free", ncol = 1)
 
 all_composite |>
-  select(bins, char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
+  select(bins, char_acc, ocfs, d18O, heinrich, mean_co2) |> 
   mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp)) |> 
-  mutate(across(-c(humans, heinrich, bins), ~ as.numeric(scale(.)))) |> 
+  mutate(across(-c(heinrich, bins), ~ as.numeric(scale(.)))) |> 
   pivot_longer(-c(bins)) |> 
   ggplot(aes(x = bins, y = value)) +
   geom_point() +
@@ -420,11 +416,11 @@ Tsample <- which(rowSums(Y) != 0)
 
 # set up X
 X <- all_composite |>
-  select(bins, char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
+  select(bins, char_acc, ocfs, d18O, heinrich, mean_co2) |> 
   arrange(desc(bins)) |> 
   mutate(ocfs = sqrt(ocfs)) |> 
   mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp),
-         across(-c(humans, heinrich, bins), ~ as.numeric(scale(.)))) |>
+         across(-c(heinrich, bins), ~ as.numeric(scale(.)))) |>
   select(-bins) |> 
   as.matrix()
 
@@ -615,8 +611,7 @@ X_names_list <- c(
   d18O = "B: &delta;<sup>18</sup>O",
   mean_co2 ="C: CO<sub>2</sub>",
   char_acc ="D: Charcoal accumulation",
-  ocfs ="E: Fungal spores",
-  humans = "F: Human presence"
+  ocfs ="E: Fungal spores"
 )
 
 mods_boot <- map(res, ~ {
@@ -666,7 +661,7 @@ mods_boot_68_B <- mods_boot_68 |>
       TRUE ~ x  # Keep other values unchanged
     )),
         name = fct(name, levels = c("Grass", "Herbs", "_Pinus_", "_Quercus_")),
-        cov = fct(cov, levels = c("heinrich", "d18O", "mean_co2", "char_acc", "ocfs", "humans")))
+        cov = fct(cov, levels = c("heinrich", "d18O", "mean_co2", "char_acc", "ocfs")))
 
 
 boot_plot_int <- ggplot(mods_boot_68_B |> filter(hyp == "mnTS_mod_int"),
@@ -733,11 +728,11 @@ Tsample <- which(rowSums(Y) != 0)
 
 # set up X
 X <- all_composite_woholo |>
-  select(bins, char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
+  select(bins, char_acc, ocfs, d18O, heinrich, mean_co2) |> 
   arrange(desc(bins)) |> 
   mutate(ocfs = sqrt(ocfs)) |> 
   mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp),
-         across(-c(humans, heinrich, bins), ~ as.numeric(scale(.)))) |>
+         across(-c(heinrich, bins), ~ as.numeric(scale(.)))) |>
   select(-bins) |> 
   as.matrix()
 
@@ -866,8 +861,7 @@ X_names_list <- c(
   d18O = "B: &delta;<sup>18</sup>O",
   mean_co2 ="C: CO<sub>2</sub>",
   char_acc ="D: Charcoal accumulation",
-  ocfs ="E: Fungal spores",
-  humans = "F: Human presence"
+  ocfs ="E: Fungal spores"
 )
 
 mods_boot <- map(res, ~ {
@@ -918,7 +912,7 @@ mods_boot_68_B <- mods_boot_68 |>
       TRUE ~ x  # Keep other values unchanged
     )),
         name = fct(name, levels = c("Grass", "Herbs", "_Pinus_", "_Quercus_")),
-        cov = fct(cov, levels = c("heinrich", "d18O", "mean_co2", "char_acc", "ocfs", "humans")))
+        cov = fct(cov, levels = c("heinrich", "d18O", "mean_co2", "char_acc", "ocfs")))
 
 
 boot_plot <- ggplot(mods_boot_68_B, aes(x = name, y = boot_mean, colour = as_factor(sig), shape = as_factor(hyp))) +
@@ -1036,12 +1030,11 @@ X_names_list2 <- c(
   d18O = "&delta;<sup>18</sup>O",
   mean_co2 ="CO<sub>2</sub>",
   char_acc ="Charcoal",
-  ocfs ="Spores",
-  humans = "Human"
+  ocfs ="Spores"
 )
 
 cov_plot <- all_composite |>
-  select(bins, char_acc, ocfs, d18O, humans, heinrich, mean_co2) |> 
+  select(bins, char_acc, ocfs, d18O, heinrich, mean_co2) |> 
   mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp)) |> 
   pivot_longer(-c(bins)) |> 
   ggplot(aes(x = bins, y = value)) +
@@ -1134,8 +1127,7 @@ X_names_list3 <- c(
   d18O = "&delta;<sup>18</sup>O",
   mean_co2 ="CO<sub>2</sub>",
   char_acc ="Charcoal accumulation",
-  ocfs ="Fungal spores",
-  humans = "Human presence"
+  ocfs ="Fungal spores"
 )
 boot_plot_int2 <- ggplot(mods_boot_68_B |> filter(hyp == "mnTS_mod_int"),
                         aes(x = name, y = boot_mean, colour = as_factor(sig))) +
