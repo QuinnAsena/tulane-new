@@ -507,11 +507,11 @@ lapply(mnTS_mod_int_refit, coef)
 
 
 # bootstrapping -----------------------------------------------------------
-
+dir.create("./results")
 start_time <- Sys.time()
 
 future::plan(strategy = multisession, workers = 10)
-mods <- c(setNames(rep(list(mnTS_mod_refit[[2]]), 5),
+mods <- c(setNames(rep(list(mnTS_mod_refit[[3]]), 5),
                     paste0("mnTS_mod", 1:5)),
           setNames(rep(list(mnTS_mod_int_refit[[2]]), 5),
                      paste0("mnTS_mod_int", 1:5)))
@@ -692,9 +692,10 @@ boot_plot_int <- ggplot(mods_boot_68_B |> filter(hyp == "mnTS_mod_int"),
   )
 boot_plot_int
 
+dir.create("./images") 
 
 ggsave(
-  "./results/boot_plot_int.svg",
+  "./images/boot_plot_int.svg",
   boot_plot_int,
   height = 15,
   width = 14,
@@ -702,7 +703,7 @@ ggsave(
   device = svg)
 
 ggsave(
-  "./results/boot_plot_int.png",
+  "./images/boot_plot_int.png",
   boot_plot_int,
   height = 15,
   width = 14,
@@ -950,7 +951,7 @@ boot_plot
 
 
 ggsave(
-  "./results/boot_plot_all.svg",
+  "./images/boot_plot_all.svg",
   boot_plot,
   height = 19,
   width = 27,
@@ -958,7 +959,7 @@ ggsave(
   device = svg)
 
 ggsave(
-  "./results/boot_plot_all.png",
+  "./images/boot_plot_all.png",
   boot_plot,
   height = 19,
   width = 27,
@@ -1006,7 +1007,7 @@ mods_boot_68_C_plot <- ggplot(mods_boot_68_C |> filter(hyp %in% c("mnTS_mod_int"
 
 
 ggsave(
-  "./results/boot_plot_C_SI.svg",
+  "./images/boot_plot_C_SI.svg",
   mods_boot_68_C_plot,
   height = 15,
   width = 14,
@@ -1015,7 +1016,7 @@ ggsave(
 
 
 ggsave(
-  "./results/boot_plot_C_SI.png",
+  "./images/boot_plot_C_SI.png",
   mods_boot_68_C_plot,
   height = 15,
   width = 14,
