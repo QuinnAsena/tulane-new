@@ -1084,14 +1084,13 @@ pol_count_plot <- ggplot(all_composite_plot, aes(x = age, y = value)) +
 
 tulane_esa <- pol_count_plot + cov_plot + plot_layout(widths = c(0.6, 0.4))
 ggsave(
-  filename = "../esa-2025/figures/tulane_esa.svg",
+  filename = "./images/tulane_esa.svg",
   plot = tulane_esa,
   device = "svg",
   width = 10.67,
   height = 6,
   units = "in"
 )
-
 
 
 ###
@@ -1120,8 +1119,6 @@ boot_C_plot_int <- mods_boot_68_C |>
     axis.title = element_text(size = 10),
     strip.background = element_rect(fill = NA),
   )
-
-
 
 X_names_list3 <- c(
   heinrich ="Heinrich events",
@@ -1161,7 +1158,7 @@ boot_plot_int2
 tulane_B_C_ESA <- boot_plot_int2 + boot_C_plot_int + plot_layout(widths = c(0.8, 0.2))
 
 ggsave(
-  filename = "../esa-2025/figures/tulane_B_C_ESA.svg",
+  filename = "./images/tulane_B_C_ESA.svg",
   plot = tulane_B_C_ESA,
   device = "svg",
   width = 10,
