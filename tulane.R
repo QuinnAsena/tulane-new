@@ -86,14 +86,13 @@ core_20_char <- core_20_char |>
   select(depth_composite, accu_rate)
 colnames(core_20_char) <- c("depth", "char_acc")
 
-# core_20_spore <- core_20_spore |> 
-#   select(depth_composite, `OCFS Concentration`)
-# colnames(core_20_spore) <- c("depth" , "ocfs")
 core_20_spore <- core_20_spore |> 
   select(OCFS_conc, depth_core)
 colnames(core_20_spore) <- c("ocfs", "depth")
 
-
+humans <- read_csv("data/humans-kelly2025/kelly2025_recalcSPD_HUC3.csv") |>
+  select(-c(`...1`)) |>
+  arrange(desc(calBP))
 
 # Handling state-variables
 # Variations in tree cover in North America since the LGM
@@ -165,6 +164,7 @@ pollen_wide <- grimm_06_groups |>
   mutate(age = nora_pollen_wide$new_age) |> 
   arrange(desc(age))
 
+# write_csv(pollen_wide, "./data/pollen_wide.csv")
 
 # nora_poll <-  read_csv("./data/tula94_pollen_files/tula94_pollen.csv")
 # 
@@ -231,6 +231,7 @@ composite_covariate_join <- chron |>
   arrange(desc(cov_age))
 # Binary variables left as NA for summarise later
 dim(composite_covariate_join)
+# write_csv(composite_covariate_join, "./data/composite_covariate_join.csv")
 
 composite_covariate_join |> 
   select(-c(quant_5perc, quant_95perc)) |> 
@@ -305,11 +306,37 @@ oxy18_mean <- cbind(bins = oxy_bins, oxy18_mean) |>
 
 ###
 
-all_composite <- pollen_wide_binned |> 
-  full_join(composite_covariate_join_bin, by = "bins") |> 
-  full_join(co2_mean, by = "bins") |> 
-  full_join(oxy18_mean, by = "bins") |> 
+human_bins <- cut(humans$calBP,
+            breaks = seq(from = min(pollen_wide$age), 
+                         to = max(pollen_wide$age + bin_width), 
+                         by = bin_width),
+            include.lowest = T, labels = F)
+
+
+humans_binned <- bind_cols(human_bins = human_bins, humans) |> 
+  group_by(human_bins) |> 
+  summarise(
+    calBP = mean(calBP, na.rm = T),
+    PrDens = mean(PrDens, na.rm = T)) |> 
+  arrange(desc(human_bins))
+
+###
+
+all_composite <- pollen_wide_binned |>
+  full_join(composite_covariate_join_bin, by = "bins") |>
+  full_join(co2_mean, by = "bins") |>
+  full_join(oxy18_mean, by = "bins") |>
+  left_join(humans_binned |> select(-c(calBP)), by = c("bins" = "human_bins")) |>
+  mutate(PrDens = ifelse(is.na(PrDens), 0, PrDens)) |>
   arrange(desc(bins))
+
+write_csv(all_composite, "./data/all_composite.csv")
+
+# all_composite <- pollen_wide_binned |>
+#   full_join(composite_covariate_join_bin, by = "bins") |>
+#   full_join(co2_mean, by = "bins") |>
+#   full_join(oxy18_mean, by = "bins") |>
+#   arrange(desc(bins))
 
 # all_composite |> select(bins, age, ocfs) |> 
 #   arrange(bins) |> 
@@ -332,7 +359,7 @@ all_composite <- pollen_wide_binned |>
 
 
 all_composite |> 
-  select(bins, char_acc, ocfs, d18O, heinrich, mean_co2) |> 
+  select(bins, char_acc, ocfs, d18O, heinrich, mean_co2, PrDens) |> 
   pivot_longer(-c(bins)) |> 
   ggplot(aes(x = bins, y = value)) +
   geom_point() +
@@ -340,16 +367,16 @@ all_composite |>
   facet_wrap(~name, scales = "free", ncol = 1)
 
 all_composite |> 
-  select(bins, char_acc, ocfs, d18O, heinrich, mean_co2) |> 
+  select(bins, char_acc, ocfs, d18O, heinrich, mean_co2, PrDens) |> 
   mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp)) |> 
   pivot_longer(-c(bins)) |> 
   ggplot(aes(x = bins, y = value)) +
   geom_point() +
   geom_line() +
   facet_wrap(~name, scales = "free", ncol = 1)
-
+  
 all_composite |>
-  select(bins, char_acc, ocfs, d18O, heinrich, mean_co2) |> 
+  select(bins, char_acc, ocfs, d18O, heinrich, mean_co2, PrDens) |> 
   mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp)) |> 
   mutate(across(-c(heinrich, bins), ~ as.numeric(scale(.)))) |> 
   pivot_longer(-c(bins)) |> 
@@ -416,7 +443,7 @@ Tsample <- which(rowSums(Y) != 0)
 
 # set up X
 X <- all_composite |>
-  select(bins, char_acc, ocfs, d18O, heinrich, mean_co2) |> 
+  select(bins, char_acc, ocfs, d18O, heinrich, mean_co2, PrDens) |> 
   arrange(desc(bins)) |> 
   mutate(ocfs = sqrt(ocfs)) |> 
   mutate(across(c(char_acc, ocfs, d18O, mean_co2), forecast::na.interp),
@@ -685,10 +712,10 @@ boot_plot_int <- ggplot(mods_boot_68_B |> filter(hyp == "mnTS_mod_int"),
     legend.background = element_rect(fill = NA),
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
-    axis.text = element_markdown(size = 8),
+    axis.text.x.bottom = element_markdown(size = 8),
     axis.title = element_text(size = 10),
     panel.spacing.x=unit(0, "lines"),
-    panel.spacing.y=unit(0, "lines") 
+    panel.spacing.y=unit(0, "lines")
   )
 boot_plot_int
 
@@ -942,7 +969,7 @@ boot_plot <- ggplot(mods_boot_68_B, aes(x = name, y = boot_mean, colour = as_fac
     legend.background = element_rect(fill = NA),
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
-    axis.text = element_markdown(size = 8),
+    axis.text.x.bottom = element_markdown(size = 8),
     axis.title = element_text(size = 10),
     panel.spacing.x=unit(0, "lines"),
     panel.spacing.y=unit(0, "lines")
@@ -1002,7 +1029,7 @@ mods_boot_68_C_plot <- ggplot(mods_boot_68_C |> filter(hyp %in% c("mnTS_mod_int"
     legend.text = element_text(size = 8),
     legend.title = element_text(size = 8),
     legend.background = element_rect(fill = NA),
-    axis.text = element_markdown(size = 8, angle = 45, hjust = 1),
+    axis.text.x.bottom = element_markdown(size = 8, angle = 45, hjust = 1),
     axis.title = element_text(size = 10))
 
 
@@ -1115,7 +1142,7 @@ boot_C_plot_int <- mods_boot_68_C |>
     legend.text = element_text(size = 8),
     legend.title = element_text(size = 8),
     legend.background = element_rect(fill = NA),
-    axis.text = element_markdown(size = 8, angle = 45, hjust = 1),
+    axis.text.x.bottom = element_markdown(size = 8, angle = 45, hjust = 1),
     axis.title = element_text(size = 10),
     strip.background = element_rect(fill = NA),
   )
@@ -1148,10 +1175,10 @@ boot_plot_int2 <- ggplot(mods_boot_68_B |> filter(hyp == "mnTS_mod_int"),
     legend.background = element_rect(fill = NA),
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
-    axis.text = element_markdown(size = 8),
+    axis.text.x.bottom = element_markdown(size = 8),
     axis.title = element_text(size = 10),
     panel.spacing.x=unit(0, "lines"),
-    panel.spacing.y=unit(0, "lines") 
+    panel.spacing.y=unit(0, "lines")
   )
 boot_plot_int2
 
