@@ -1,20 +1,22 @@
 library(dplyr)
 library(readr)
 library(forecast)
-source("TVARSS_28Jan25.R")
+source("kalman-smoother/TVARSS_11Feb25.r")
 
+# Read-in wrangled data from tulane.R
 all_composite <- read_csv("./data/all_composite.csv")
 
 # necessary as global variable
 bin_width = 200
 
-# Perdictors
+# Predictors
+# Use Nora's topic model output instead of pollen counts 
 topic <- read_csv("data/topic_model/ctm_topics4.csv") |>
   select(-c(`...1`)) |>
   rename(topic1 = `1`, topic2 = `2`, topic3 = `3`, topic4 = `4`) |>
   arrange(desc(age))
 
-# Bin topics
+# Bin topics using original pollen data age
 topic_bins <- cut(topic$age,
             breaks = seq(from = min(all_composite$age, na.rm = T), 
                          to = max((all_composite$age + bin_width), na.rm = T), 
@@ -28,19 +30,29 @@ topic_binned <- bind_cols(topic_bins = topic_bins, topic) |>
     across(starts_with("topic"), \(x) mean(x, na.rm = TRUE))) |> 
   arrange(desc(topic_bins))
 
+# Join bins, ages are almost identical but not exact so joining by bins instead of age
 all_composite |>
   left_join(topic_binned |> select(-c(age)), by = c("bins" = "topic_bins")) |>
   select(-c(other, Grass, Herbs, Pinus, Quercus)) |>
   arrange(desc(bins))
 
-# set up X
+# set up X - ocfs as response variable
 X <- all_composite |>
   select(bins, ocfs) |>
   arrange(desc(bins)) |> 
   select(-bins) |> 
   as.matrix()
 
-# set up U
+# First point in X needs a value so setting to 100
+X[1] <- 100
+
+# X_df <- data.frame(y = all_composite$ocfs, x = all_composite$bins)
+# X_df_gam <- mgcv::gam(y ~ s(x, bs = "bs", k = nrow(X_df)), method = "REML", data =  X_df)
+# pred_df <- predict(X_df_gam, newdata = data.frame(x = X_df$x[which(is.na(X_df$y))] ))
+# X_df$y[which(is.na(X_df$y))] <- pred_df
+# plot(X_df$x, X_df$y, type = "l", xlab = "bins", ylab = "ocfs")
+
+# set up U - predictors
 U <- all_composite |>
   select(bins, char_acc, d18O, heinrich, mean_co2, PrDens) |> 
   mutate(across(c(char_acc, d18O, mean_co2), forecast::na.interp),
@@ -53,42 +65,12 @@ U <- all_composite |>
 # Set up parameters -------------------------------------------------------
 
 # number of lags in the autocorrelation function
-p <- 3
-# standard error of the measurement error. Setting su.fixed = 1 assumes that the measurement error has SD = 1. Setting su.fixed = NA will get the fitting to estimate su.
-ME <- rep(1, nrow(d))
+p <- 2
+# standard error of the measurement error.
+# Setting su.fixed = 1 assumes that the measurement error has SD = 1.
+# Setting su.fixed = NA will get the fitting to estimate su.
+ME <- rep(1, nrow(U))
 su.fixed <- 1
-
-
-
-
-
-
-LL <- scale(d$LL)
-temp <- scale(d$Temperature)
-Age <- d$Age
-
-# Create a list of U variables that can be used in the analyses
-Age5000 <- as.numeric(Age < 5000)
-Age5500 <- as.numeric(Age < 5500)
-Age4800 <- as.numeric(Age < 4800)
-
-U.list <- data.frame(
-  LL = LL,
-  temp = temp,
-  LL_temp = LL * temp,
-  Age5000 = Age5000,
-  Age5500 = Age5500,
-  Age4800 = Age4800,
-  LL_Age5000 = LL * Age5000,
-  LL_Age5500 = LL * Age5500,
-  LL_Age4800 = LL * Age4800,
-  temp_Age5000 = temp * Age5000,
-  temp_Age5500 = temp * Age5500,
-  temp_Age4800 = temp * Age4800,
-  LL_temp_Age5000 = LL * temp * Age5000,
-  LL_temp_Age5500 = LL * temp * Age5500,
-  LL_temp_Age4800 = LL * temp * Age4800
-)
 
 # -----------------------------------------------------------------
 # Analyses: I set this up so you have to pick and choose the
@@ -97,18 +79,11 @@ U.list <- data.frame(
 # what is going on.
 # -----------------------------------------------------------------
 
-# test
-source("TVARSS_11Feb25.r")
-p <- 2
-
-# It is possible to have the autoregression coefficients change through time by setting sb0.fixed = NA and/or sb.fixed = matrix(NA,1,p). Setting them to zero means the auoregression coeffients don't change.
+# It is possible to have the autoregression coefficients change
+# through time by setting sb0.fixed = NA and/or sb.fixed = matrix(NA,1,p).
+# Setting them to zero means the auoregression coeffients don't change.
 sb0.fixed <- 0
 sb.fixed <- matrix(0,1,p)
-
-X <- d[,"Hemlock_d13c"]
-
-pick.list <- list(c("LL"), c("temp"), c("LL", "temp"))
-U <- U.list[,pick.list[[1]], drop = F]
 
 mod0 <- TVARSS(X = X, p = p, ME = ME, Tsamplefract = .9, show.fig = F, annealing = F,
                sb0.fixed = sb0.fixed,
@@ -132,6 +107,9 @@ c(dev = dev, df = df, P = pchisq(dev, df = df, lower.tail = F))
 
 P_indep_vars_TVARSS(mod)
 
+
+
+#---------- Below is Tony's code to run as a loop, not used for now ----------#
 
 run <- function(p){
 	
