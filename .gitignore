@@ -49,8 +49,5 @@ po/*~
 rsconnect/
 
 # Large files
-results_human/bootstraps_1000.rds
-results_human/woholo_bootstraps_1000.rds
-
-results/bootstraps_1000.rds
-results/woholo_bootstraps_1000.rds
+/results_scenarios/*
+/results_kelly/*
