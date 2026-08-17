@@ -989,8 +989,20 @@ boot_plots <- tidyr::expand_grid(scenario = names(scenario_labels),
     p
   })
 
-boot_plot_int <- boot_plots[[2]] # humans, with Holocene, with interactions
-boot_plot_int
+boot_plots[[1]] # humans, with Holocene, without interactions
+boot_plots[[2]] # humans, with Holocene, with interactions
+
+boot_plots[[3]] # humans, without Holocene, without interactions
+boot_plots[[4]] # humans, without Holocene, with interactions
+
+boot_plots[[5]] # no humans, with Holocene, without interactions
+boot_plots[[6]] # no humans, with Holocene, with interactions
+
+boot_plots[[7]] # no humans, without Holocene, without interactions
+boot_plots[[8]] # no humans, without Holocene, with interactions
+
+
+
 
 ## Bootstrap plotting supp info --------------------------------------------
 # All four scenarios overlaid, one figure per C-matrix variant
@@ -1035,6 +1047,7 @@ boot_plot_all_noint <- mods_boot_68_B |>
   filter(hyp == "mnTS_mod") |>
   boot_plot_compare(title = "Without species interaction")
 boot_plot_all_noint
+
 
 # Everything on one figure: covariates down, C-matrix variant across
 boot_plot <- mods_boot_68_B |>
