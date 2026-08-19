@@ -32,6 +32,50 @@
 OCFS_LAMBDA <- 0.25   # power transform exponent; see reports/ for the derivation
 BIN_WIDTH   <- 200    # years, must match tulane.R
 
+# ---------------------------------------------------------------------------
+# The degenerate branch, and why fits are filtered on se
+# ---------------------------------------------------------------------------
+# This likelihood has a second, higher-likelihood family of solutions in which
+# the process-error SD collapses to ~0 while the autoregression sits close to the
+# unit circle. With se = 0 the latent series is a DETERMINISTIC AR(2) recursion,
+# and near the unit circle such a recursion is flexible enough to trace almost
+# any smooth curve - so it chases the data and wins on likelihood by 15-25 log
+# units. On this dataset it appears once the observation variance is inflated
+# (tau >~ 1.25) and it is reached only from some starting values, which makes the
+# tau profile non-reproducible and produces negative drop-one deviances.
+#
+# It is rejected on scientific grounds, not numerical ones: se = 0 asserts that a
+# 60-kyr record of megaherbivore activity has NO process noise at all - that every
+# fluctuation is measurement error and the underlying signal is exactly
+# predictable from its own two previous values. That is not an admissible model of
+# an ecological time series.
+#
+# Fits are therefore required to have se >= se.min, a fraction of sd(response).
+#
+# This filter is a GUARD, not a selection device, and the distinction matters. At
+# tau = 0 - the primary observation model, where su is fixed entirely from the
+# measured counting variance - se comes out around 0.31 of sd(response) and the
+# guard never binds. It only starts to bind once the observation variance is
+# inflated, which is exactly the regime the analysis avoids.
+#
+# It is deliberately set low (2% of sd) so that it excludes only genuine
+# degeneracy. An earlier draft used 5%, which on this dataset sat right between
+# two competing optima (se/sd of 0.0395 and 0.0522) and so silently decided which
+# fit was reported - a threshold doing real inferential work is a fudge, not a
+# guard. If you see the "all fits fell below se.min" warning, do not simply lower
+# the floor: that means the model is unidentified at that tau and the fix is to
+# reduce tau, not to admit the degenerate branch.
+#
+# Set se.min = 0 to disable the filter and see the degenerate solutions yourself.
+SE_MIN_FRAC <- 0.02
+
+# TRUE if a fit is usable: it exists, has a finite likelihood, and its process
+# noise is not in the degenerate corner.
+se_admissible <- function(m, se.min = 0) {
+  !is.null(m) && !inherits(m, "try-error") && is.finite(m$logLik) &&
+    (se.min <= 0 || (is.finite(m$se) && m$se >= se.min))
+}
+
 # =============================================================================
 # 1. Transform
 # =============================================================================
@@ -253,12 +297,27 @@ fit_ocfs <- function(X, U, ME, p = 2, su.fixed = 1, c.start = NULL,
 fit_ms <- function(X, U, ME, p = 2, su.fixed = 1,
                    starts = c(0.001, 0.01, 0.05, 0.1, 0.25, 0.5),
                    b0.start = NA, b.start = array(NA, dim = p),
-                   extra.starts = list(), arima.start = TRUE, quiet = TRUE, ...) {
+                   extra.starts = list(), arima.start = TRUE, quiet = TRUE,
+                   se.min = 0, ...) {
 
   if (is.null(U) || ncol(U) == 0) {
-    return(fit_ocfs(X, NULL, ME, p = p, su.fixed = su.fixed,
-                    b0.start = b0.start, b.start = b.start, ...))
+    # no predictors: still multi-start over b, because the degenerate branch
+    # exists here too
+    cand <- list(try(fit_ocfs(X, NULL, ME, p = p, su.fixed = su.fixed,
+                              b0.start = b0.start, b.start = b.start, ...),
+                     silent = TRUE))
+    if (!se_admissible(cand[[1]], se.min))
+      cand <- c(cand, list(try(fit_ocfs(X, NULL, ME, p = p, su.fixed = su.fixed,
+                                        b0.start = mean(X, na.rm = TRUE),
+                                        b.start = rep(0.3, p), ...), silent = TRUE)))
+    ok <- Filter(function(m) se_admissible(m, se.min), cand)
+    if (length(ok)) return(ok[[which.max(vapply(ok, function(m) m$logLik, 0))]])
+    ok <- Filter(function(m) se_admissible(m, 0), cand)
+    if (!length(ok)) stop("fit_ms: null-model fit failed")
+    warning("fit_ms: no fit met se.min for the null model; returning the best available")
+    return(ok[[which.max(vapply(ok, function(m) m$logLik, 0))]])
   }
+
   U <- as.matrix(U)
   grid <- lapply(starts, function(s) rep(s, ncol(U)))
 
@@ -273,16 +332,30 @@ fit_ms <- function(X, U, ME, p = 2, su.fixed = 1,
   }
   grid <- c(grid, extra.starts)
 
-  best <- NULL
-  for (g in grid) {
-    m <- try(fit_ocfs(X, U, ME, p = p, su.fixed = su.fixed, c.start = g,
-                      b0.start = b0.start, b.start = b.start, ...), silent = TRUE)
-    if (!inherits(m, "try-error") && is.finite(m$logLik) &&
-        (is.null(best) || m$logLik > best$logLik)) best <- m
+  fits <- lapply(grid, function(g)
+    try(fit_ocfs(X, U, ME, p = p, su.fixed = su.fixed, c.start = g,
+                 b0.start = b0.start, b.start = b.start, ...), silent = TRUE))
+
+  # Choose the best ADMISSIBLE fit. Without this filter the optimiser sometimes
+  # returns the se ~ 0 deterministic-trend solution, which beats every honest fit
+  # on likelihood and then produces negative drop-one deviances downstream.
+  ok <- Filter(function(m) se_admissible(m, se.min), fits)
+  n_degen <- sum(vapply(fits, function(m) se_admissible(m, 0), TRUE)) - length(ok)
+
+  if (!length(ok)) {
+    any_ok <- Filter(function(m) se_admissible(m, 0), fits)
+    if (!length(any_ok)) stop("fit_ms: every start failed")
+    warning(sprintf(paste("fit_ms: all %d fits fell below se.min = %.4g (degenerate",
+                          "zero-process-noise branch); returning the best available.",
+                          "Treat its estimates as unreliable."), length(any_ok), se.min))
+    return(any_ok[[which.max(vapply(any_ok, function(m) m$logLik, 0))]])
   }
-  if (is.null(best)) stop("fit_ms: every start failed")
-  if (!quiet) cat(sprintf("    fit_ms: %d starts, best logLik = %.4f\n",
-                          length(grid), best$logLik))
+
+  best <- ok[[which.max(vapply(ok, function(m) m$logLik, 0))]]
+  if (!quiet)
+    cat(sprintf("    fit_ms: %d starts, best admissible logLik = %.4f (se = %.4f)%s\n",
+                length(grid), best$logLik, best$se,
+                if (n_degen > 0) sprintf(", %d degenerate fit(s) rejected", n_degen) else ""))
   best
 }
 
@@ -291,7 +364,7 @@ fit_ms <- function(X, U, ME, p = 2, su.fixed = 1,
 # from there, and keep any improvement. Iterate until no reduced model beats the
 # full one. This is what makes the drop-one deviances non-negative.
 ascend <- function(full, reduced, X, U, ME, p = 2, su.fixed = 1,
-                   max_pass = 4, quiet = FALSE) {
+                   max_pass = 4, quiet = FALSE, se.min = 0) {
   U <- as.matrix(U)
   for (pass in seq_len(max_pass)) {
     improved <- FALSE
@@ -303,7 +376,7 @@ ascend <- function(full, reduced, X, U, ME, p = 2, su.fixed = 1,
       m <- try(fit_ocfs(X, U, ME, p = p, su.fixed = su.fixed, c.start = cs,
                         b0.start = reduced[[i]]$b0, b.start = reduced[[i]]$b),
                silent = TRUE)
-      if (!inherits(m, "try-error") && is.finite(m$logLik) && m$logLik > full$logLik) {
+      if (se_admissible(m, se.min) && m$logLik > full$logLik) {
         if (!quiet) cat(sprintf("    ascend pass %d: full model %.4f -> %.4f (via %s)\n",
                                 pass, full$logLik, m$logLik, colnames(U)[i]))
         full <- m
@@ -380,7 +453,8 @@ dominant_eigen <- function(mod) {
 # Drop-one LRTs with the ascent built in. Returns the table AND the (possibly
 # improved) full model, because the ascent can change it.
 drop_one <- function(full, X, U, ME, p = 2, su.fixed = 1, n_obs,
-                     starts = c(0.001, 0.01, 0.05, 0.1, 0.25), quiet = FALSE) {
+                     starts = c(0.001, 0.01, 0.05, 0.1, 0.25), quiet = FALSE,
+                     se.min = 0) {
   U <- as.matrix(U)
   vars <- colnames(U)
   reduced <- vector("list", length(vars))
@@ -389,12 +463,13 @@ drop_one <- function(full, X, U, ME, p = 2, su.fixed = 1, n_obs,
     reduced[[i]] <- fit_ms(X, U[, -i, drop = FALSE], ME, p = p, su.fixed = su.fixed,
                            starts = starts,
                            extra.starts = list(as.vector(full$c)[-i]),
-                           b0.start = full$b0, b.start = full$b)
-    if (!quiet) cat(sprintf("    drop %-9s reduced logLik = %10.4f\n",
-                            vars[i], reduced[[i]]$logLik))
+                           b0.start = full$b0, b.start = full$b, se.min = se.min)
+    if (!quiet) cat(sprintf("    drop %-9s reduced logLik = %10.4f  (se = %.4f)\n",
+                            vars[i], reduced[[i]]$logLik, reduced[[i]]$se))
   }
 
-  full <- ascend(full, reduced, X, U, ME, p = p, su.fixed = su.fixed, quiet = quiet)
+  full <- ascend(full, reduced, X, U, ME, p = p, su.fixed = su.fixed,
+                 quiet = quiet, se.min = se.min)
 
   dev <- 2 * (full$logLik - vapply(reduced, function(m) m$logLik, 0))
   assert_nonneg_dev(dev, vars)
@@ -453,30 +528,65 @@ me_with_tau <- function(var_obs, tau) var_obs + tau^2
 # Profile the likelihood over tau. Returns the grid and the ML value. Profiling
 # rather than joint optimisation because tau trades off against se, and a 1-D
 # profile is far more reliable here than letting Nelder-Mead find it.
-profile_tau <- function(X, U, var_obs, p = 2,
-                        taus = c(0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3),
+#
+# Grid points are independent, so this parallelises perfectly. Set workers = 1
+# for a serial run.
+#
+# Read the sum_b column as well as logLik. On this dataset se falls and sum(b)
+# climbs towards 1 as tau rises: the likelihood has a ridge along which process
+# noise is traded for observation noise, ending in a near-random-walk latent
+# series with almost no innovation variance. That ridge is nearly flat, so tau is
+# only weakly identified and the persistence estimate travels with it.
+profile_tau <- function(X, U, var_obs, p = 2, se.min = 0,
+                        taus = c(0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2),
                         b0.start = NA, b.start = array(NA, dim = p),
-                        starts = c(0.01, 0.05, 0.1, 0.25), verbose = TRUE) {
-  res <- data.frame(tau = taus, logLik = NA_real_, se = NA_real_, sum_b = NA_real_)
-  fits <- vector("list", length(taus))
-  for (i in seq_along(taus)) {
+                        starts = c(0.01, 0.05, 0.1, 0.25), verbose = TRUE,
+                        workers = 1, root = getwd()) {
+
+  one <- function(i) {
     ME <- me_with_tau(var_obs, taus[i])
-    m <- try(fit_ms(X, U, ME, p = p, su.fixed = 1, starts = starts,
+    m <- try(fit_ms(X, U, ME, p = p, su.fixed = 1, starts = starts, se.min = se.min,
                     b0.start = b0.start, b.start = b.start), silent = TRUE)
-    if (!inherits(m, "try-error")) {
-      fits[[i]] <- m
-      res$logLik[i] <- m$logLik
-      res$se[i] <- m$se
-      res$sum_b[i] <- sum(m$b)
-    }
-    if (verbose)
-      cat(sprintf("  tau = %5.2f  logLik = %10.4f  se = %7.4f  sum(b) = %6.3f\n",
-                  taus[i], res$logLik[i], res$se[i], res$sum_b[i]))
+    if (inherits(m, "try-error")) NULL else m
   }
+
+  if (workers > 1 && requireNamespace("furrr", quietly = TRUE)) {
+    Xw <- X; Uw <- U; vw <- var_obs; pw_ <- p; sw <- starts; smw <- se.min
+    b0w <- b0.start; bw <- b.start; tw <- taus; rootw <- root
+    future::plan(future::multisession, workers = workers)
+    on.exit(future::plan(future::sequential), add = TRUE)
+    fits <- furrr::future_map(seq_along(taus), function(i) {
+      setwd(rootw)
+      suppressMessages({
+        library(forecast)
+        source("kalman-smoother/TVARSS_12Aug26.r")
+        source("kalman-smoother/ocfs_helpers.r")
+      })
+      ME <- me_with_tau(vw, tw[i])
+      m <- try(fit_ms(Xw, Uw, ME, p = pw_, su.fixed = 1, starts = sw, se.min = smw,
+                      b0.start = b0w, b.start = bw), silent = TRUE)
+      if (inherits(m, "try-error")) NULL else m
+    }, .options = furrr::furrr_options(seed = 1984))
+    future::plan(future::sequential)
+  } else {
+    fits <- lapply(seq_along(taus), one)
+  }
+
+  res <- data.frame(
+    tau    = taus,
+    logLik = vapply(fits, function(m) if (is.null(m)) NA_real_ else m$logLik, 0),
+    se     = vapply(fits, function(m) if (is.null(m)) NA_real_ else m$se, 0),
+    sum_b  = vapply(fits, function(m) if (is.null(m)) NA_real_ else sum(m$b), 0)
+  )
+  if (verbose)
+    for (i in seq_along(taus))
+      cat(sprintf("  tau = %5.2f  logLik = %10.4f  se = %7.4f  sum(b) = %6.3f\n",
+                  res$tau[i], res$logLik[i], res$se[i], res$sum_b[i]))
+
   best <- which.max(res$logLik)
   res$dlogLik <- res$logLik - res$logLik[best]
-  # 95% profile-likelihood interval for tau: within 1.92 log-likelihood units
-  inside <- res$tau[res$dlogLik > -qchisq(0.95, 1) / 2]
+  # 95% profile-likelihood interval: within qchisq(.95, 1)/2 = 1.92 units
+  inside <- res$tau[!is.na(res$dlogLik) & res$dlogLik > -qchisq(0.95, 1) / 2]
   list(profile = res, tau = res$tau[best], fit = fits[[best]],
        ci = if (length(inside)) range(inside) else c(NA, NA), fits = fits)
 }

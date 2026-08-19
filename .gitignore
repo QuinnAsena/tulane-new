@@ -51,3 +51,6 @@ rsconnect/
 # Large files
 /results_scenarios/*
 /results_kelly/*
+
+# cache files
+/results/cache/*

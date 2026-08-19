@@ -196,6 +196,28 @@ pollen_wide |>
       text = element_text(size = 9),
     )
 
+
+obs_dens_plot <- ggplot(pollen_wide, aes(x = age)) +
+  geom_density() +
+  geom_rug() +
+  labs(x = "Time (ybp)", y = "Density") +
+  theme_minimal() +
+  theme(
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 8),
+    # panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.background = element_rect(fill = NA)
+  )
+
+ggsave(
+  "./images/obs_dens_plot.svg",
+  obs_dens_plot,
+  height = 27,
+  width = 27,
+  units = "cm",
+  device = svg)
+
 bins <- cut(pollen_wide$age,
             breaks = seq(from = min(pollen_wide$age), 
                          to = max(pollen_wide$age + bin_width), 
@@ -772,7 +794,7 @@ wald_bind_x <- wald_bind |>
 
 
 B_plot <- ggplot(wald_bind_x, aes(x = hyp, y = Coef., colour = as_factor(sig),
-                                  shape = scenario)) +
+                                  shape = scenario, group = scenario)) +
   geom_point(position = position_dodge(width = 0.6)) +
   geom_errorbar(aes(ymin = Coef. - se, ymax = Coef. + se),
                 position = position_dodge(width = 0.6)) +
@@ -1008,15 +1030,18 @@ boot_plots[[8]] # no humans, without Holocene, with interactions
 # All four scenarios overlaid, one figure per C-matrix variant
 
 boot_plot_compare <- function(dat, title = NULL) {
+  # group = scenario so the dodge order follows the scenario factor alone.
+  # Without it ggplot groups by every discrete aesthetic, so colour (i.e.
+  # significance) ends up driving the left-to-right order of the points too.
   ggplot(dat, aes(x = name, y = boot_mean, colour = as_factor(sig),
-                  shape = scenario)) +
+                  shape = scenario, group = scenario)) +
     geom_point(position = position_dodge(width = 0.6), size = 2) +
     geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.2) +
     geom_errorbar(aes(ymin = lower_68, ymax = upper_68),
                   width = .4, alpha = 0.5, position = position_dodge(width = 0.6)) +
     scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
                        values = c("#202020", "#d80000")) +
-    scale_shape_manual(name = NULL, labels = scenario_labels, values = c(17, 19, 2, 1),
+    scale_shape_manual(name = NULL, labels = scenario_labels, values = c(17, 2, 1, 19),
                        drop = FALSE) +
     guides(shape = guide_legend(nrow = 2, byrow = TRUE)) +
     labs(x = "Taxa", y = "MultinomialTS coefficient estimate", title = title) +
@@ -1103,7 +1128,8 @@ mods_boot_68_C <- mods_boot_68 |>
 
 
 mods_boot_68_C_plot <- ggplot(mods_boot_68_C |> filter(hyp == "mnTS_mod_int"),
-                              aes(x = name, y = boot_mean, colour = as_factor(sig), shape = scenario)) +
+                              aes(x = name, y = boot_mean, colour = as_factor(sig),
+                                  shape = scenario, group = scenario)) +
   geom_point(position = position_dodge(width = 0.6), size = 2) +
   geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.2) +
   geom_errorbar(aes(ymin = lower_68, ymax = upper_68),
