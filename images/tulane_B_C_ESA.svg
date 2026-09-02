@@ -232,8 +232,9 @@
 </defs>
 <g clip-path='url(#cpNDAuMTJ8MjEwLjIyfDE4Ni4zNXwyMDUuNjQ=)'>
 <rect x='40.12' y='186.35' width='170.11' height='19.29' style='stroke-width: 1.07; stroke: #333333;' />
-<text x='79.42' y='198.27' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='36.00px' lengthAdjust='spacingAndGlyphs'>Charcoal</text>
-<text x='117.92' y='198.27' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='53.00px' lengthAdjust='spacingAndGlyphs'>accumulation</text>
+<text x='73.67' y='198.27' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='9.00px' lengthAdjust='spacingAndGlyphs'>D:</text>
+<text x='85.17' y='198.27' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='36.00px' lengthAdjust='spacingAndGlyphs'>Charcoal</text>
+<text x='123.67' y='198.27' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='53.00px' lengthAdjust='spacingAndGlyphs'>accumulation</text>
 </g>
 <g clip-path='url(#cpMC4wMHw3MjAuMDB8MC4wMHw0MzIuMDA=)'>
 </g>
@@ -244,8 +245,9 @@
 </defs>
 <g clip-path='url(#cpMjEwLjIyfDM4MC4zM3wxODYuMzV8MjA1LjY0)'>
 <rect x='210.22' y='186.35' width='170.11' height='19.29' style='stroke-width: 1.07; stroke: #333333;' />
-<text x='266.77' y='198.27' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='27.50px' lengthAdjust='spacingAndGlyphs'>Fungal</text>
-<text x='296.77' y='198.27' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='27.00px' lengthAdjust='spacingAndGlyphs'>spores</text>
+<text x='261.27' y='198.27' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='8.50px' lengthAdjust='spacingAndGlyphs'>E:</text>
+<text x='272.27' y='198.27' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='27.50px' lengthAdjust='spacingAndGlyphs'>Fungal</text>
+<text x='302.27' y='198.27' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='27.00px' lengthAdjust='spacingAndGlyphs'>spores</text>
 </g>
 <g clip-path='url(#cpMC4wMHw3MjAuMDB8MC4wMHw0MzIuMDA=)'>
 </g>
@@ -256,6 +258,10 @@
 </defs>
 <g clip-path='url(#cpMzgwLjMzfDU1MC40M3wxODYuMzV8MjA1LjY0)'>
 <rect x='380.33' y='186.35' width='170.11' height='19.29' style='stroke-width: 1.07; stroke: #333333;' />
+<text x='408.13' y='198.27' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='8.00px' lengthAdjust='spacingAndGlyphs'>F:</text>
+<text x='418.63' y='198.27' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='29.00px' lengthAdjust='spacingAndGlyphs'>Human</text>
+<text x='450.13' y='198.27' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='41.50px' lengthAdjust='spacingAndGlyphs'>population</text>
+<text x='494.13' y='198.27' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='28.50px' lengthAdjust='spacingAndGlyphs'>density</text>
 </g>
 <g clip-path='url(#cpMC4wMHw3MjAuMDB8MC4wMHw0MzIuMDA=)'>
 <rect x='57.95' y='27.56' width='56.19' height='58.41' style='stroke-width: 1.07; stroke: none;' />
@@ -276,8 +282,9 @@
 </defs>
 <g clip-path='url(#cpNDAuMTJ8MjEwLjIyfDEwLjk2fDMwLjI1)'>
 <rect x='40.12' y='10.96' width='170.11' height='19.29' style='stroke-width: 1.07; stroke: #333333;' />
-<text x='94.17' y='22.88' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='33.00px' lengthAdjust='spacingAndGlyphs'>Heinrich</text>
-<text x='129.67' y='22.88' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='26.50px' lengthAdjust='spacingAndGlyphs'>events</text>
+<text x='88.67' y='22.88' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='8.50px' lengthAdjust='spacingAndGlyphs'>A:</text>
+<text x='99.67' y='22.88' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='33.00px' lengthAdjust='spacingAndGlyphs'>Heinrich</text>
+<text x='135.17' y='22.88' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='26.50px' lengthAdjust='spacingAndGlyphs'>events</text>
 </g>
 <g clip-path='url(#cpMC4wMHw3MjAuMDB8MC4wMHw0MzIuMDA=)'>
 </g>
@@ -288,9 +295,10 @@
 </defs>
 <g clip-path='url(#cpMjEwLjIyfDM4MC4zM3wxMC45NnwzMC4yNQ==)'>
 <rect x='210.22' y='10.96' width='170.11' height='19.29' style='stroke-width: 1.07; stroke: #333333;' />
-<text x='285.27' y='23.52' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='5.02px' lengthAdjust='spacingAndGlyphs'>δ</text>
-<text x='290.28' y='20.95' style='font-size: 7.20px;fill: #1A1A1A; font-family: "Arial";' textLength='8.00px' lengthAdjust='spacingAndGlyphs'>18</text>
-<text x='298.28' y='23.52' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='7.00px' lengthAdjust='spacingAndGlyphs'>O</text>
+<text x='279.77' y='23.52' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='8.50px' lengthAdjust='spacingAndGlyphs'>B:</text>
+<text x='290.77' y='23.52' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='5.02px' lengthAdjust='spacingAndGlyphs'>δ</text>
+<text x='295.78' y='20.95' style='font-size: 7.20px;fill: #1A1A1A; font-family: "Arial";' textLength='8.00px' lengthAdjust='spacingAndGlyphs'>18</text>
+<text x='303.78' y='23.52' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='7.00px' lengthAdjust='spacingAndGlyphs'>O</text>
 </g>
 <g clip-path='url(#cpMC4wMHw3MjAuMDB8MC4wMHw0MzIuMDA=)'>
 </g>
@@ -301,8 +309,9 @@
 </defs>
 <g clip-path='url(#cpMzgwLjMzfDU1MC40M3wxMC45NnwzMC4yNQ==)'>
 <rect x='380.33' y='10.96' width='170.11' height='19.29' style='stroke-width: 1.07; stroke: #333333;' />
-<text x='456.63' y='21.79' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='13.50px' lengthAdjust='spacingAndGlyphs'>CO</text>
-<text x='470.13' y='24.36' style='font-size: 7.20px;fill: #1A1A1A; font-family: "Arial";' textLength='4.00px' lengthAdjust='spacingAndGlyphs'>2</text>
+<text x='450.88' y='21.79' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='9.00px' lengthAdjust='spacingAndGlyphs'>C:</text>
+<text x='462.38' y='21.79' style='font-size: 9.00px;fill: #1A1A1A; font-family: "Arial";' textLength='13.50px' lengthAdjust='spacingAndGlyphs'>CO</text>
+<text x='475.88' y='24.36' style='font-size: 7.20px;fill: #1A1A1A; font-family: "Arial";' textLength='4.00px' lengthAdjust='spacingAndGlyphs'>2</text>
 </g>
 <g clip-path='url(#cpMC4wMHw3MjAuMDB8MC4wMHw0MzIuMDA=)'>
 <polyline points='64.42,364.48 64.42,361.74 ' style='stroke-width: 1.07; stroke: #333333; stroke-linecap: butt;' />

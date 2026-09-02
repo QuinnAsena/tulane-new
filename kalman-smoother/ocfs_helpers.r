@@ -696,7 +696,12 @@ c_se <- function(mod, X, U, ME, su) {
   if (is.null(U) || ncol(as.matrix(U)) == 0) return(numeric(0))
   nm <- colnames(as.matrix(U))
   if (is.null(V)) return(setNames(rep(NA_real_, length(nm)), nm))
-  setNames(sqrt(pmax(diag(V)[nm], NA_real_)), nm)
+  # negative variances mean the optimum is not a proper interior maximum in
+  # that direction; return NA for those rather than a bogus number. Do NOT
+  # write pmax(v, NA_real_) here - pmax propagates NA and nulls every SE.
+  v <- diag(V)[nm]
+  v[!is.finite(v) | v < 0] <- NA_real_
+  setNames(sqrt(v), nm)
 }
 
 # =============================================================================

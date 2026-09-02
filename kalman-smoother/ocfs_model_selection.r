@@ -359,14 +359,13 @@ if (RUN_SENSITIVITY) {
   all_composite <- read_csv("./data/all_composite.csv", show_col_types = FALSE) |> as.data.frame()
 
   cat("\n-- (a) transform exponent: is the conclusion knife-edge on lambda = 0.25? --\n")
-  # tau lives on the response scale, so it has to be re-profiled at each lambda
-  # rather than carried over. Without that the comparison is not like-for-like.
+  # lambda is varied with tau held at 0 so the comparison isolates lambda alone.
+  # Deviances are then directly comparable with the primary analysis.
   for (lam in c(0.20, 0.25, 0.30)) {
     me_l  <- build_ocfs_me(all_composite, lambda = lam, verbose = FALSE)
     dat_l <- build_ocfs_data(all_composite, me_l, lambda = lam, verbose = FALSE)
-    tp_l  <- cached(sprintf("sens_lam%03d_tau", lam * 100),
-                    profile_tau(dat_l$X, NULL, dat_l$var_obs, p = p, verbose = FALSE))
-    ME_l  <- me_with_tau(dat_l$var_obs, tp_l$tau)
+    # tau stays at 0, matching the primary analysis: this tests lambda alone.
+    ME_l <- me_with_tau(dat_l$var_obs, 0)
     Ul <- make_U(best_spec, if (tn_best == "time_lin")
                    as.numeric(scale(seq_len(nrow(dat_l$X)))) else as.numeric(dat_l$bins <= 61))
     m0 <- cached(sprintf("sens_lam%03d_null", lam * 100),
@@ -376,7 +375,7 @@ if (RUN_SENSITIVITY) {
                         b0.start = m0$b0, b.start = m0$b))
     dv <- 2 * (mF$logLik - m0$logLik)
     cat(sprintf("  lambda = %.2f (tau = %.2f): dev = %7.3f, df = %d, P = %-9.4g  c = %s\n",
-                lam, tp_l$tau, dv, ncol(Ul),
+                lam, 0, dv, ncol(Ul),
                 pchisq(max(dv, 0), ncol(Ul), lower.tail = FALSE),
                 paste(sprintf("%+.3f", as.vector(mF$c)), collapse = " ")))
   }
@@ -391,27 +390,64 @@ if (RUN_SENSITIVITY) {
                 paste(sprintf("%+.3f", as.vector(mF$c)), collapse = " ")))
   }
 
-  cat("\n-- (c) without the Holocene (bins >= 54, as in tulane.R) --\n")
+  cat("
+-- (c) without the Holocene (bins >= 54, as in tulane.R) --
+")
+  # HUMAN is dropped from this test BY DESIGN, not for numerical convenience.
+  # PrDens is identically zero before ~13 ka, so on a pre-Holocene subset it has
+  # almost no support left and cannot be estimated: an earlier version left it in
+  # and the fit returned c = -126.9 with a deviance of 1.5e42. Asking whether
+  # human population predicts OCFS in a window that predates the population is
+  # not a meaningful question, so the test is restricted to the blocks that exist
+  # throughout the record.
   keep <- dat$bins >= 54
-  Xh <- X[keep, , drop = FALSE]; MEh <- ME[keep]; Ubh <- Ubest[keep, , drop = FALSE]
-  # a Holocene-only term is constant once the Holocene is removed; drop such columns
-  const <- apply(Ubh, 2, function(z) length(unique(z)) == 1)
-  if (any(const)) {
-    cat("  dropping constant column(s) after trimming:", paste(colnames(Ubh)[const], collapse = ", "), "\n")
-    Ubh <- Ubh[, !const, drop = FALSE]
-  }
-  nh <- sum(!is.na(Xh))
-  cat("  rows:", nrow(Xh), " observations:", nh, "\n")
-  if (ncol(Ubh) > 0) {
-    m0h <- cached("sens_woholo_null", fit_ms(Xh, NULL, MEh, p = p, su.fixed = SU))
+  spec_h <- intersect(best_spec, c("CLIM", "ABRUPT", "FIRE",
+                                   if (tn_best == "time_lin") "TIME"))
+  dropped <- setdiff(best_spec, spec_h)
+  if (length(dropped))
+    cat("  excluded (undefined or unsupported outside the Holocene):",
+        paste(dropped, collapse = ", "), "
+")
+  Xh  <- X[keep, , drop = FALSE]
+  MEh <- ME[keep]
+  Ubh <- if (length(spec_h)) make_U(spec_h, time_lin)[keep, , drop = FALSE] else NULL
+  sdh <- sd(Xh, na.rm = TRUE)
+  cat("  rows:", nrow(Xh), " observations:", sum(!is.na(Xh)),
+      " predictors:", if (is.null(Ubh)) 0 else ncol(Ubh), "
+")
+  if (!is.null(Ubh) && ncol(Ubh) > 0) {
+    obs_h <- !is.na(Xh[, 1])
+    vr <- apply(Ubh[obs_h, , drop = FALSE], 2, sd)
+    if (any(vr < 1e-8)) {
+      cat("  dropping zero-variance column(s):",
+          paste(colnames(Ubh)[vr < 1e-8], collapse = ", "), "
+")
+      Ubh <- Ubh[, vr >= 1e-8, drop = FALSE]
+    }
+    m0h <- cached("sens_woholo_null",
+                  fit_ms(Xh, NULL, MEh, p = p, su.fixed = SU,
+                         se.min = SE_MIN_FRAC * sdh))
     mFh <- cached("sens_woholo_top",
-                  fit_ms(Xh, Ubh, MEh, p = p, su.fixed = SU, b0.start = m0h$b0, b.start = m0h$b))
+                  fit_ms(Xh, Ubh, MEh, p = p, su.fixed = SU,
+                         se.min = SE_MIN_FRAC * sdh,
+                         b0.start = m0h$b0, b.start = m0h$b))
     dv <- 2 * (mFh$logLik - m0h$logLik)
-    cat(sprintf("  dev = %.3f, df = %d, P = %.4g\n", dv, ncol(Ubh),
-                pchisq(max(dv, 0), ncol(Ubh), lower.tail = FALSE)))
-    print(data.frame(term = colnames(Ubh), c = as.vector(mFh$c),
-                     longrun = longrun(mFh)), digits = 4, row.names = FALSE)
-  }
+    bad <- !is.finite(dv) || dv < -1e-6 || dv > 500 ||
+           max(abs(as.vector(mFh$c))) > 10 * sdh
+    if (bad) {
+      cat("  FIT FAILED - implausible estimates, not reporting. Check for a",
+          " covariate that is near-degenerate on this subset.
+")
+    } else {
+      cat(sprintf("  dev = %.3f, df = %d, P = %.4g   sum(b) = %.3f  se = %.4f
+",
+                  dv, ncol(Ubh), pchisq(dv, ncol(Ubh), lower.tail = FALSE),
+                  sum(mFh$b), mFh$se))
+      print(data.frame(term = colnames(Ubh), c = as.vector(mFh$c),
+                       longrun = longrun(mFh)), digits = 4, row.names = FALSE)
+    }
+  } else cat("  nothing left to test after exclusions
+")
 
   cat("\n-- (d) dropping the na.interp-filled predictor bins --\n")
   filled_bins <- unique(unlist(dat$filled))

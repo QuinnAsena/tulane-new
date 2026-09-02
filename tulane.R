@@ -1270,13 +1270,7 @@ boot_C_plot_int <- mods_boot_68_C |>
     strip.background = element_rect(fill = NA),
   )
 
-X_names_list3 <- c(
-  heinrich ="Heinrich events",
-  d18O = "&delta;<sup>18</sup>O",
-  mean_co2 ="CO<sub>2</sub>",
-  char_acc ="Charcoal accumulation",
-  ocfs ="Fungal spores"
-)
+
 boot_plot_int2 <- ggplot(mods_boot_68_B |> filter(scenario == esa_scenario,
                                                   hyp == "mnTS_mod_int"),
                         aes(x = name, y = boot_mean, colour = as_factor(sig))) +
@@ -1287,7 +1281,7 @@ boot_plot_int2 <- ggplot(mods_boot_68_B |> filter(scenario == esa_scenario,
   scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
                      values = c("#202020", "#d80000")) +
   labs(x = "Taxa", y = "MultinomialTS coefficient estimate") +
-  facet_wrap(~ cov, labeller = as_labeller(X_names_list3)) +
+  facet_wrap(~ cov, labeller = as_labeller(X_names_list)) +
   theme_bw() +
   theme(
     strip.text = element_markdown(size = 9),
