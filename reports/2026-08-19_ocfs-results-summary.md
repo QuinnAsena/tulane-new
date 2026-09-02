@@ -1,3 +1,38 @@
+> ## SUPERSEDED — 2 September 2026
+>
+> This document reports an analysis that weighted observation error **per bin**, using the
+> uncertainties in `ocfs_uncertainty.csv`. The current pipeline
+> (`kalman-smoother/ocfs_smoother.r`) instead fixes observation error to a **single number**,
+> pending confirmation of how those uncertainties were derived. That one change moves several
+> results, so read the numbers below with the following in mind.
+>
+> **Superseded:**
+>
+> | | this document (per-bin `ME`) | current (constant `ME`) |
+> |---|---|---|
+> | ABRUPT (`heinrich`) importance | 0.812 | **0.391** |
+> | HUMAN importance | 0.564 | 0.517 |
+> | CLIM / TIME / FIRE importance | 0.969 / 0.917 / 0.233 | 0.992 / 0.877 / 0.279 |
+> | omnibus *P*, all five covariates | 0.0054 | 0.0025 |
+> | `Σb` (persistence) | 0.85 | 0.62 |
+> | long-run multiplier `1/(1−Σb)` | 6.5 | 2.6 |
+> | `se` as a fraction of sd(response) | 0.31 | 0.58 |
+> | model ranking and weights | as tabulated below | see `results/ocfs/ocfs_model_ranking.csv` |
+>
+> The headline claim below that **Heinrich stadials carry the signal does not survive** the
+> change: ABRUPT drops from clearly supported to below the 0.5 no-information line. CLIM and
+> TIME remain supported and FIRE remains unsupported under both. Resolving the measurement-error
+> question therefore decides the ABRUPT result specifically.
+>
+> **Still valid, and not affected:** the λ = 0.25 derivation (§ on the transform); `c` beating
+> `d` by 10.3 AICc; no support for time-varying coefficients; the PrDens/time confound and the
+> reason TIME must compete with HUMAN; individual lag coefficients being unidentified while
+> their sum is; and the methodological finding that no individual coefficient survives model
+> averaging at |z| > 2. The Kalman-smoother bug and its fix are unaffected.
+>
+> Kept for the record because the model-averaging, standard-error and sensitivity work
+> documented here has not yet been redone in the current pipeline.
+
 # OCFS drivers: results from the rebuilt TVARSS analysis
 
 **19 August 2026.** Produced by `kalman-smoother/ocfs_analysis.r` (Tier 2) and

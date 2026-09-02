@@ -54,3 +54,9 @@ rsconnect/
 
 # cache files
 /results/cache/*
+
+# personal working notes
+/notes/
+
+# packages built for emailing out
+/share/
