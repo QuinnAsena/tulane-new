@@ -96,10 +96,13 @@ fit_ocfs <- function(U, c.start, b0.start = NA, b.start = rep(NA, p)) {
                b0.start = b0.start, b.start = b.start)
   if (!is.null(U)) {
     U <- as.matrix(U)
+    # c.start is normally one number used for every covariate, but a full vector
+    # can be passed to start from another model's solution.
     args <- c(args, list(U = U,
                          c.fixed = rep(NA, ncol(U)),
                          d.fixed = rep(0, ncol(U)),
-                         c.start = rep(c.start, ncol(U))))
+                         c.start = if (length(c.start) == ncol(U)) c.start
+                                   else rep(c.start[1], ncol(U))))
   }
   do.call(TVARSS, args)
 }
@@ -113,15 +116,21 @@ fit_ocfs <- function(U, c.start, b0.start = NA, b.start = rep(NA, p)) {
 # evidence that a single fit cannot be trusted, so discarding it would discard
 # the diagnostic. Inspect it with attr(mod, "starts") for the summary table, or
 # attr(mod, "fits") for the fitted objects themselves.
-best_fit <- function(U, starts = c(0.01, 0.05, 0.1, 0.25, 0.5), ...) {
+#
+# `extra` takes a list of full c.start vectors, for starting from a smaller
+# model's solution with zeros for the new terms. That guarantees the larger model
+# can always reach at least the smaller one's likelihood, which is what stops
+# nested comparisons coming out negative.
+best_fit <- function(U, starts = c(0.01, 0.05, 0.1, 0.25, 0.5), extra = list(), ...) {
   if (is.null(U)) starts <- NA          # nothing in c to start, so one fit only
-  fits <- lapply(starts, function(s) try(fit_ocfs(U, s, ...), silent = TRUE))
+  grid <- c(as.list(starts), extra)
+  fits <- lapply(grid, function(s) try(fit_ocfs(U, s, ...), silent = TRUE))
   ok <- !vapply(fits, inherits, logical(1), "try-error")
   stopifnot(any(ok))
   fits <- fits[ok]
 
   summ <- data.frame(
-    start       = starts[ok],
+    start       = vapply(grid[ok], function(s) s[1], numeric(1)),
     logLik      = vapply(fits, function(m) m$logLik, numeric(1)),
     se          = vapply(fits, function(m) m$se, numeric(1)),
     sum_b       = vapply(fits, function(m) sum(m$b), numeric(1)),
@@ -264,6 +273,132 @@ best <- fits[[results$label[1]]]
 coefs <- data.frame(term = colnames(best$U), c = as.vector(best$c))
 
 
+# Drop-one variable importance --------------------------------------------
+
+# Every model above is compared with the NULL. This instead compares each model
+# with itself minus one block, which is the usual variable-importance test and
+# what Tony's template does (it tests `mod` against `mod1`, the main effects).
+#
+# No refitting is needed. The grid is every subset of the five blocks, so for any
+# model and any block inside it, the model with that block removed is already in
+# the grid - each test is a lookup.
+ll <- setNames(scen$logLik, scen$label)
+kk <- setNames(scen$k, scen$label)
+
+drop1 <- do.call(rbind, lapply(seq_len(nrow(scen)), \(i) {
+  on <- unlist(scen[i, names(blocks)])
+  if (!any(on)) return(NULL)                      # nothing to drop from the null
+  do.call(rbind, lapply(names(blocks)[on], \(b) {
+    keep <- on; keep[b] <- FALSE
+    red <- if (any(keep)) paste(names(blocks)[keep], collapse = "+") else "null"
+    data.frame(model = scen$label[i], dropped = b, reduced = red,
+               dev = unname(2 * (ll[scen$label[i]] - ll[red])),
+               df  = unname(kk[scen$label[i]] - kk[red]))
+  }))
+}))
+drop1$P <- pchisq(pmax(drop1$dev, 0), drop1$df, lower.tail = FALSE)
+
+# Same reasoning as the omnibus guard: a negative deviance between nested models
+# means the optimiser failed on the larger one. A warning rather than a stop,
+# because values of order 1e-3 are just numerical noise - but anything larger
+# means that row's test cannot be reported.
+if (any(drop1$dev < -1e-6)) {
+  warning("negative drop-one deviance(s) - the larger model is not at its maximum")
+  print(drop1[drop1$dev < -1e-6, ], row.names = FALSE, digits = 4)
+}
+
+# CLIM is a 2-df test because d18O and mean_co2 enter and leave together. That is
+# deliberate: they correlate at 0.89, and splitting them makes both look weak
+# while the pair is strong.
+drop1[drop1$model == results$label[1], ]
+
+
+# Interactions within the best model ---------------------------------------
+
+# Are the covariate effects additive? Six pairwise interactions among the four
+# variables in the best-supported model, built as raw products the way Tony's
+# template does (cbind(U1, inter = a*b)), and each tested against the
+# MAIN-EFFECTS model rather than against the null.
+best_blocks <- names(blocks)[unlist(scen[scen$label == results$label[1], names(blocks)])]
+best_cols   <- unlist(blocks[best_blocks], use.names = FALSE)
+U_best      <- U_all[, best_cols, drop = FALSE]
+
+prs <- combn(best_cols, 2, simplify = FALSE)
+INT <- sapply(prs, \(pr) U_all[, pr[1]] * U_all[, pr[2]])
+colnames(INT) <- vapply(prs, paste, character(1), collapse = ":")
+
+# READ THIS BEFORE INTERPRETING ANY INTERACTION COEFFICIENT.
+# These products are near-duplicates of their own main effects. PrDens was
+# standardised, so its 232 structural zeros became a constant -0.229, which makes
+# PrDens x d18O very nearly a rescaled copy of d18O across 79% of the record.
+#   The likelihood-ratio tests and AICc below are still valid - adding the raw
+#   product spans the same model space however it is parameterised, so the
+#   maximised likelihood and the df are unaffected.
+#   The individual c coefficients are NOT interpretable for the terms near 1
+#   below, and the main effects in those models will shift a long way from the
+#   base. Check the `spread` column: a wide spread across starting values means
+#   the optimiser is wandering along a near-flat ridge.
+round(apply(INT, 2, \(z) max(abs(cor(z, U_best)))), 3)
+
+# Note on the three X:time terms: they are the parametric version of "does this
+# driver's effect change through time", which is what TVARSS's sb tests
+# non-parametrically - and that was tested and rejected (freeing sb0 cost 5.09
+# AICc, sb 6.92, both 12.09). A significant X:time interaction would be in
+# tension with that and is worth investigating, not reporting at face value.
+
+int_specs <- c(list(none = character(0)),
+               setNames(as.list(colnames(INT)), colnames(INT)),
+               list(all = colnames(INT)))
+
+int_U <- \(cols) if (length(cols)) cbind(U_best, INT[, cols, drop = FALSE]) else U_best
+
+int_file <- "results/cache/ocfs_interaction_fits.rds"
+if (file.exists(int_file)) {
+  int_fits <- readRDS(int_file)
+} else {
+  # Fit the base first, then start every interaction model FROM the base solution
+  # with the new coefficient(s) at zero, as well as from the usual grid. That
+  # starting point reproduces the base exactly, so an interaction model can never
+  # come out worse than the model it nests - which is what happened on the first
+  # attempt here (mean_co2:PrDens landed 0.0099 short) and what leaves the
+  # all-six model wandering, since its log-likelihood spanned 16 units across
+  # plain starting values.
+  ibase <- best_fit(U_best, b0.start = mod0$b0, b.start = mod0$b)
+  plan(multisession, workers = 6)
+  int_fits <- future_map(int_specs[-1], \(cols)
+    best_fit(int_U(cols),
+             extra = list(c(as.vector(ibase$c), rep(0, length(cols)))),
+             b0.start = ibase$b0, b.start = ibase$b),
+    .options = furrr_options(seed = 1984))
+  plan(sequential)
+  int_fits <- c(list(none = ibase), int_fits)
+  dir.create(dirname(int_file), recursive = TRUE, showWarnings = FALSE)
+  saveRDS(int_fits, int_file)
+}
+
+int_res <- data.frame(
+  interaction = names(int_fits),
+  k      = vapply(int_fits, \(m) m$npar, integer(1)),
+  logLik = vapply(int_fits, \(m) m$logLik, numeric(1)),
+  spread = vapply(int_fits, \(m) diff(range(attr(m, "starts")$logLik)), numeric(1))
+)
+int_res$AICc  <- with(int_res, -2*logLik + 2*k + 2*k*(k+1)/(n_obs - k - 1))
+int_res$dAICc <- int_res$AICc - min(int_res$AICc)
+ib <- which(int_res$interaction == "none")
+int_res$dev <- 2 * (int_res$logLik - int_res$logLik[ib])
+int_res$df  <- int_res$k - int_res$k[ib]
+int_res$P   <- pchisq(pmax(int_res$dev, 0), int_res$df, lower.tail = FALSE)
+int_res$P[ib] <- NA
+
+# The base is the same model as the grid's best, on the same data, so its AICc
+# must match. If it does not, the refit found a different optimum and nothing in
+# this table can be compared with the grid.
+stopifnot(abs(int_res$AICc[ib] - results$AICc[1]) < 1e-6)
+stopifnot(int_res$dev >= -1e-6)
+
+int_res[order(int_res$AICc), ]
+
+
 # Smoothed series ---------------------------------------------------------
 
 # The corrected smoother, applied to the best-supported model. This is what the
@@ -310,6 +445,8 @@ write.csv(data.frame(block = names(importance), summed_weight = importance),
 write.csv(data.frame(label = names(spread), logLik_spread = spread),
           file.path(out, "ocfs_start_spread.csv"), row.names = FALSE)
 write.csv(coefs, file.path(out, "ocfs_top_coefficients.csv"), row.names = FALSE)
+write.csv(drop1, file.path(out, "ocfs_drop_one.csv"), row.names = FALSE)
+write.csv(int_res, file.path(out, "ocfs_interactions.csv"), row.names = FALSE)
 write.csv(smoothed, file.path(out, "ocfs_smoothed.csv"), row.names = FALSE)
 
 png(file.path(out, "ocfs_smoothed.png"), width = 1600, height = 1000, res = 140)
