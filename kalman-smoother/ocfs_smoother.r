@@ -2,8 +2,7 @@
 ##
 ## STEP 1: data prep, plus one null model and one full model.
 ## Step 2 will replace the single full fit with an expand.grid over covariate
-## scenarios. Tony's example run() loop that used to sit at the bottom of this
-## file is superseded by that; it is still in git history if needed.
+
 
 library(dplyr)
 library(readr)
@@ -12,33 +11,21 @@ library(furrr)
 library(forecast)
 
 # TVARSS_12Aug26.r is TVARSS_11Feb25.r with the Kalman SMOOTHER corrected; the
-# filter and the log-likelihood are byte-identical, so no fit changes. The old
-# smoother returned values only at observed times and got them wrong on gappy
-# series - see smoother_fix_demo.r, which reproduces the bug and the fix.
+# filter and the log-likelihood are byte-identical, so no fit changes.
 source("kalman-smoother/TVARSS_12Aug26.r")
 
 all_composite <- read_csv("./data/all_composite.csv", show_col_types = FALSE)
 
-# all_composite is stored sorted bins 309 -> 1, i.e. oldest first, so row order
-# already runs forward in time. If that ever changes, the predictors would be
-# silently misaligned with the response and every coefficient would be wrong -
-# hence a hard stop rather than a re-sort.
+# Check for time direction
 stopifnot(all(diff(all_composite$bins) < 0))
 plot(all_composite$ocfs)
 
 # Response ----------------------------------------------------------------
 
-# Fourth root, not sqrt and not log. Chosen from the per-sample uncertainties in
-# ocfs_uncertainty.csv by asking which exponent makes the MEASUREMENT ERROR
-# homoscedastic and symmetric: the optimum is 0.24-0.30. sqrt (0.5) leaves the
-# error growing with the value (r = 0.60), log overshoots so it shrinks with the
-# value (r = -0.77). 0^0.25 = 0, so the seven zero-count bins need no offset.
+# Claude tested a range of response transformations. ^0.25 turns out best.
 d <- all_composite |> mutate(ocfs_t = ocfs^0.25)
 
-# Clip to the first real observation. The previous version set X[1] <- 100
-# because TVARSS's initial-updating block has no NA check and breaks on a
-# missing first value - but with su small that invented number is then treated
-# as near-exact data anchoring the series at 62.7 ka.
+# Clip to the first observation. Slightly shorter than pollen series.
 d <- d[min(which(!is.na(d$ocfs_t))):nrow(d), ]
 
 X <- matrix(d$ocfs_t, ncol = 1)
@@ -48,8 +35,7 @@ plot(X)
 
 # char_acc and mean_co2 have internal gaps (18 and 14 bins here) which are
 # interpolated because TVARSS requires U complete at every time step.
-# heinrich is a 0/1 stadial indicator, so it is left unscaled - its coefficient
-# then reads per stadial rather than per SD.
+
 U <- d |>
   select(char_acc, d18O, heinrich, mean_co2, PrDens) |>
   mutate(across(c(char_acc, d18O, mean_co2), ~ as.numeric(forecast::na.interp(.))),
@@ -63,32 +49,38 @@ stopifnot(nrow(U) == nrow(X), !anyNA(U))
 
 p <- 2                    # lags, so 200 and 400 yr
 
-# Measurement error is a single number for this first pass, pending a
-# conversation with the analysts about how the csv's uncertainties were derived.
-# su = 1 happens to be close to right on this scale: the mean per-bin
-# observation SD implied by the csv is 1.013. (On the raw concentration scale,
-# where sd(ocfs) = 5867, su = 1 was absurd.) Fixing su rather than estimating it
-# also avoids a degenerate solution where se collapses to 0 and the latent
-# series becomes a deterministic AR(2) that traces the data.
-# To move to per-bin weighting later, replace this one line with a vector.
+# Measurement error is a single number for this first pass
+# su = 1 happens to be close to right on this scale
 ME <- rep(1, nrow(X))
 su.fixed <- 1
 
 # sb0 = sb = 0 pins the autoregression coefficients, so this is an ordinary
 # AR(2) state-space model. The "time-varying" part of TVARSS is switched off;
-# freeing it cost 5-12 AICc when tested.
 sb0.fixed <- 0
 sb.fixed <- matrix(0, 1, p)
 
 n_obs <- sum(!is.na(X))   # 83 observations in 293 bins; use n_obs for AICc
 
 
+# Caching -----------------------------------------------------------------
+
+# Every fitted model is saved, so a rerun puts everything back in memory without
+# refitting. R evaluates arguments lazily, so `expr` only runs when there is no
+# cache file. Delete a file to force that one step to refit.
+cache_dir <- "results/cache"
+
+cached <- function(file, expr) {
+  if (file.exists(file)) return(readRDS(file))
+  val <- force(expr)
+  dir.create(dirname(file), recursive = TRUE, showWarnings = FALSE)
+  saveRDS(val, file)
+  val
+}
+
+
 # Fitting -----------------------------------------------------------------
 
-# Predictors enter through c (the process equation), so their effect is filtered
-# through the autoregression and accumulates while the covariate persists.
-# d.fixed = 0 keeps them out of the observation equation; c and d are not
-# jointly identifiable with 83 points.
+# Supply arguments for Null model (no U) and full model (inc. U).
 fit_ocfs <- function(U, c.start, b0.start = NA, b.start = rep(NA, p)) {
   args <- list(X = X, p = p, ME = ME, su.fixed = su.fixed, Tsamplefract = .9,
                show.fig = FALSE, annealing = FALSE, initial.points = "stationary",
@@ -96,8 +88,6 @@ fit_ocfs <- function(U, c.start, b0.start = NA, b.start = rep(NA, p)) {
                b0.start = b0.start, b.start = b.start)
   if (!is.null(U)) {
     U <- as.matrix(U)
-    # c.start is normally one number used for every covariate, but a full vector
-    # can be passed to start from another model's solution.
     args <- c(args, list(U = U,
                          c.fixed = rep(NA, ncol(U)),
                          d.fixed = rep(0, ncol(U)),
@@ -107,20 +97,7 @@ fit_ocfs <- function(U, c.start, b0.start = NA, b.start = rep(NA, p)) {
   do.call(TVARSS, args)
 }
 
-# One fit is never enough here. TVARSS optimises with Nelder-Mead, which reports
-# convergence = 0 when its simplex stops moving, not when it has found the
-# optimum - different starting values land on log-likelihoods several units
-# apart and can flip coefficient signs. So try a grid and keep the best.
-#
-# Every fit is kept, not just the winner: the spread across starts is the
-# evidence that a single fit cannot be trusted, so discarding it would discard
-# the diagnostic. Inspect it with attr(mod, "starts") for the summary table, or
-# attr(mod, "fits") for the fitted objects themselves.
-#
-# `extra` takes a list of full c.start vectors, for starting from a smaller
-# model's solution with zeros for the new terms. That guarantees the larger model
-# can always reach at least the smaller one's likelihood, which is what stops
-# nested comparisons coming out negative.
+# Loop fit_ocfs over starting values for c, and return the best fit.
 best_fit <- function(U, starts = c(0.01, 0.05, 0.1, 0.25, 0.5), extra = list(), ...) {
   if (is.null(U)) starts <- NA          # nothing in c to start, so one fit only
   grid <- c(as.list(starts), extra)
@@ -142,8 +119,10 @@ best_fit <- function(U, starts = c(0.01, 0.05, 0.1, 0.25, 0.5), extra = list(), 
   best
 }
 
-mod0 <- best_fit(NULL)                                        # no covariates
-mod1 <- best_fit(U, b0.start = mod0$b0, b.start = mod0$b)     # all five
+mod0 <- cached(file.path(cache_dir, "ocfs_mod0.rds"),         # no covariates
+               best_fit(NULL))
+mod1 <- cached(file.path(cache_dir, "ocfs_mod1.rds"),         # all five
+               best_fit(U, b0.start = mod0$b0, b.start = mod0$b))
 
 attr(mod1, "starts")   # how much did the starting value matter?
 
@@ -152,8 +131,7 @@ attr(mod1, "starts")   # how much did the starting value matter?
 
 # A negative deviance between nested models is arithmetically impossible at the
 # maxima, so it means the optimiser failed on one of them. pchisq() of a
-# negative deviance returns 1, which is how the previous version of this script
-# produced a table of P = 1 and read it as "no effect". Stop instead.
+# negative deviance returns 1, so including a check
 dev <- 2 * (mod1$logLik - mod0$logLik)
 stopifnot(dev >= -1e-6)
 
@@ -209,23 +187,17 @@ scen$label <- apply(scen[names(blocks)], 1, \(on)
 # cached because the downstream table gets edited far more often than the fits
 # change - delete the file to force a refit. It lives under results/cache/,
 # which is gitignored.
-fits_file <- "results/cache/ocfs_scenario_fits.rds"
-
-if (file.exists(fits_file)) {
-  fits <- readRDS(fits_file)
-} else {
+# Progress is not streamed back from workers, so this runs quietly.
+fits <- cached(file.path(cache_dir, "ocfs_scenario_fits.rds"), local({
   plan(multisession, workers = 6)
-  # Progress is not streamed back from workers, so this runs quietly.
-  fits <- future_map(seq_len(nrow(scen)), \(i) {
+  out <- future_map(seq_len(nrow(scen)), \(i) {
     cols <- unlist(blocks[unlist(scen[i, names(blocks)])], use.names = FALSE)
     Ui <- if (length(cols)) U_all[, cols, drop = FALSE] else NULL
     best_fit(Ui, b0.start = mod0$b0, b.start = mod0$b)
   }, .options = furrr_options(seed = 1984))
   plan(sequential)
-
-  dir.create(dirname(fits_file), recursive = TRUE, showWarnings = FALSE)
-  saveRDS(fits, fits_file)
-}
+  out
+}))
 names(fits) <- scen$label
 
 # Did any scenario land on a meaningfully different optimum depending on where
@@ -275,9 +247,8 @@ coefs <- data.frame(term = colnames(best$U), c = as.vector(best$c))
 
 # Drop-one variable importance --------------------------------------------
 
-# Every model above is compared with the NULL. This instead compares each model
-# with itself minus one block, which is the usual variable-importance test and
-# what Tony's template does (it tests `mod` against `mod1`, the main effects).
+# Every model above is compared with the NULL. The following
+# is the usual variable-importance test
 #
 # No refitting is needed. The grid is every subset of the five blocks, so for any
 # model and any block inside it, the model with that block removed is already in
@@ -315,7 +286,7 @@ drop1[drop1$model == results$label[1], ]
 
 # Interactions within the best model ---------------------------------------
 
-# Are the covariate effects additive? Six pairwise interactions among the four
+# Six pairwise interactions among the four
 # variables in the best-supported model, built as raw products the way Tony's
 # template does (cbind(U1, inter = a*b)), and each tested against the
 # MAIN-EFFECTS model rather than against the null.
@@ -352,29 +323,27 @@ int_specs <- c(list(none = character(0)),
 
 int_U <- \(cols) if (length(cols)) cbind(U_best, INT[, cols, drop = FALSE]) else U_best
 
-int_file <- "results/cache/ocfs_interaction_fits.rds"
-if (file.exists(int_file)) {
-  int_fits <- readRDS(int_file)
-} else {
-  # Fit the base first, then start every interaction model FROM the base solution
-  # with the new coefficient(s) at zero, as well as from the usual grid. That
-  # starting point reproduces the base exactly, so an interaction model can never
-  # come out worse than the model it nests - which is what happened on the first
-  # attempt here (mean_co2:PrDens landed 0.0099 short) and what leaves the
-  # all-six model wandering, since its log-likelihood spanned 16 units across
-  # plain starting values.
-  ibase <- best_fit(U_best, b0.start = mod0$b0, b.start = mod0$b)
+# Fit the base first, then start every interaction model FROM the base solution
+# with the new coefficient(s) at zero, as well as from the usual grid. That
+# starting point reproduces the base exactly, so an interaction model can never
+# come out worse than the model it nests - which is what happened on the first
+# attempt here (mean_co2:PrDens landed 0.0099 short) and what leaves the
+# all-six model wandering, since its log-likelihood spanned 16 units across
+# plain starting values.
+int_fits <- cached(file.path(cache_dir, "ocfs_interaction_fits.rds"), local({
+  base <- best_fit(U_best, b0.start = mod0$b0, b.start = mod0$b)
   plan(multisession, workers = 6)
-  int_fits <- future_map(int_specs[-1], \(cols)
+  out <- future_map(int_specs[-1], \(cols)
     best_fit(int_U(cols),
-             extra = list(c(as.vector(ibase$c), rep(0, length(cols)))),
-             b0.start = ibase$b0, b.start = ibase$b),
+             extra = list(c(as.vector(base$c), rep(0, length(cols)))),
+             b0.start = base$b0, b.start = base$b),
     .options = furrr_options(seed = 1984))
   plan(sequential)
-  int_fits <- c(list(none = ibase), int_fits)
-  dir.create(dirname(int_file), recursive = TRUE, showWarnings = FALSE)
-  saveRDS(int_fits, int_file)
-}
+  c(list(none = base), out)
+}))
+
+# The main-effects base, available whether the fits were cached or just run.
+ibase <- int_fits[["none"]]
 
 int_res <- data.frame(
   interaction = names(int_fits),
@@ -401,10 +370,7 @@ int_res[order(int_res$AICc), ]
 
 # Smoothed series ---------------------------------------------------------
 
-# The corrected smoother, applied to the best-supported model. This is what the
-# fix was for: an interpolated OCFS series across the 210 bins with no
-# observation, each with an honest standard error. The old smoother returned
-# nothing at those bins at all.
+# The corrected smoother, applied to the best-supported model.
 sm <- TVARSS_KalmanSmoother(best)
 stopifnot(!anyNA(sm$X.smoothed),          # a value at every bin, not just the 83
           !is.null(sm$X.smoothed.se))     # NULL here means the old smoother
